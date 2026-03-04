@@ -26,8 +26,12 @@ const otpLimiter = rateLimit({
 app.use('/auth/send-otp', otpLimiter);
 app.use('/auth/verify-otp', otpLimiter);
 
+// Set up model associations (must be before routes)
+require('./models');
+
 // Routes
 app.use('/auth', require('./routes/auth'));
+app.use('/events', require('./routes/events'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

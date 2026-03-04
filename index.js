@@ -3,6 +3,7 @@ const app = require('./src/app');
 const sequelize = require('./src/config/database');
 const redis = require('./src/config/redis');
 const { up: runMigration } = require('./src/migrations/001_create_users');
+const { up: runMigration2 } = require('./src/migrations/002_create_events');
 
 async function start() {
   try {
@@ -13,8 +14,9 @@ async function start() {
     await sequelize.authenticate();
     console.log('MySQL connected');
 
-    // Run migration (creates tables if not exist)
+    // Run migrations (idempotent — CREATE TABLE IF NOT EXISTS)
     await runMigration();
+    await runMigration2();
 
     // Start server
     app.listen(env.port, () => {
