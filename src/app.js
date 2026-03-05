@@ -32,6 +32,7 @@ require('./models');
 // Routes
 app.use('/auth', require('./routes/auth'));
 app.use('/events', require('./routes/events'));
+app.use('/photos', require('./routes/photos'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
