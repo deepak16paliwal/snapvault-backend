@@ -5,6 +5,7 @@ const router = express.Router();
 
 const { Event, EventMember, User } = require('../models');
 const { authenticate, requireRole } = require('../middleware/authMiddleware');
+const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/emailService');
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -200,6 +201,62 @@ router.delete('/:id', authenticate, requireRole('organizer'), async (req, res) =
   } catch (err) {
     console.error('Delete event error:', err);
     res.status(500).json({ error: 'Failed to deactivate event' });
+  }
+});
+
+// POST /events/:id/add-member — Organizer adds a member by email
+router.post('/:id/add-member', authenticate, requireRole('organizer'), [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+], async (req, res) => {
+  if (!validate(req, res)) return;
+
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const inviteLink = `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`;
+    const { email } = req.body;
+
+    const targetUser = await User.findOne({ where: { email, is_active: true } });
+
+    if (!targetUser) {
+      // Not registered — send invite email with the event join link
+      try {
+        await sendEventInviteEmail(email, event.title, req.user.name, inviteLink);
+      } catch (emailErr) {
+        console.error('Invite email failed:', emailErr.message);
+      }
+      return res.json({
+        status: 'invited',
+        message: `${email} is not on SnapVault yet. An invite email has been sent.`,
+      });
+    }
+
+    // Already a member?
+    const existing = await EventMember.findOne({
+      where: { event_id: event.id, user_id: targetUser.id },
+    });
+    if (existing) {
+      return res.status(409).json({ error: 'This user is already a member of the event' });
+    }
+
+    // Add as guest member
+    await EventMember.create({ event_id: event.id, user_id: targetUser.id, role: 'guest' });
+
+    // Send notification email (non-blocking)
+    sendAddedToEventEmail(targetUser.email, event.title, req.user.name).catch((err) =>
+      console.error('Notification email failed:', err.message)
+    );
+
+    res.status(201).json({
+      status: 'added',
+      message: `${targetUser.name} has been added to the event.`,
+    });
+  } catch (err) {
+    console.error('Add member error:', err);
+    res.status(500).json({ error: 'Failed to add member' });
   }
 });
 
