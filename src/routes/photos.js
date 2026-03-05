@@ -2,14 +2,19 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { randomUUID } = require('crypto');
 const path = require('path');
+const multer = require('multer');
 const router = express.Router();
 
-const { Photo, Event, EventMember, User } = require('../models');
+const { Photo, PhotoFace, Event, EventMember, User } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
 const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile } = require('../services/s3Service');
+const rekognitionService = require('../services/rekognitionService');
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
+// Multer: in-memory storage for face-search endpoint (5MB max)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -24,6 +29,25 @@ function validate(req, res) {
 async function isMember(eventId, userId) {
   const m = await EventMember.findOne({ where: { event_id: eventId, user_id: userId } });
   return !!m;
+}
+
+// Helper: build photo response with presigned URLs (reused in multiple endpoints)
+async function buildPhotoResponse(p) {
+  const [photoUrl, thumbnailUrl] = await Promise.all([
+    getDownloadUrl(p.s3_key),
+    p.thumbnail_key ? getDownloadUrl(p.thumbnail_key) : null,
+  ]);
+  return {
+    id: p.id,
+    event_id: p.event_id,
+    original_filename: p.original_filename,
+    file_size: p.file_size,
+    mime_type: p.mime_type,
+    photo_url: photoUrl,
+    thumbnail_url: thumbnailUrl,
+    uploader: p.uploader,
+    created_at: p.created_at,
+  };
 }
 
 // POST /photos/signed-url
@@ -100,9 +124,34 @@ router.post('/confirm', authenticate, [
     setImmediate(async () => {
       try {
         await generateThumbnail(photo.s3_key, photo.thumbnail_key);
-        await photo.update({ thumbnail_key: photo.thumbnail_key });
       } catch (thumbErr) {
         console.error('Thumbnail generation failed:', thumbErr.message);
+      }
+
+      // Face indexing — runs after thumbnail attempt regardless
+      try {
+        const faces = await rekognitionService.indexFaces(
+          process.env.AWS_S3_BUCKET,
+          photo.s3_key,
+          String(photo.id)
+        );
+        if (faces.length > 0) {
+          await PhotoFace.bulkCreate(
+            faces.map((f) => ({
+              photo_id: photo.id,
+              rekognition_face_id: f.faceId,
+              confidence: f.confidence,
+            }))
+          );
+          await photo.update({ face_index_status: 'indexed', face_indexed_at: new Date() });
+          console.log(`[Rekognition] Photo ${photo.id}: indexed ${faces.length} face(s)`);
+        } else {
+          await photo.update({ face_index_status: 'no_faces' });
+          console.log(`[Rekognition] Photo ${photo.id}: no faces detected`);
+        }
+      } catch (faceErr) {
+        console.error(`[Rekognition] Photo ${photo.id} indexing failed:`, faceErr.message);
+        await photo.update({ face_index_status: 'failed' }).catch(() => {});
       }
     });
 
@@ -118,6 +167,66 @@ router.post('/confirm', authenticate, [
   } catch (err) {
     console.error('Confirm photo error:', err);
     res.status(500).json({ error: 'Failed to confirm upload' });
+  }
+});
+
+// POST /photos/face-search
+// Search for photos matching a selfie within a specific event
+router.post('/face-search', authenticate, upload.single('image'), [
+  body('event_id').isInt({ min: 1 }).withMessage('Valid event_id required'),
+], async (req, res) => {
+  if (!validate(req, res)) return;
+
+  if (!req.file) {
+    return res.status(400).json({ error: 'Image file required' });
+  }
+
+  const eventId = parseInt(req.body.event_id);
+
+  try {
+    // Verify event and membership
+    const event = await Event.findOne({ where: { id: eventId, is_active: true } });
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const member = await isMember(eventId, req.user.id);
+    if (!member) return res.status(403).json({ error: 'You are not a member of this event' });
+
+    // Search Rekognition collection with the selfie
+    const matches = await rekognitionService.searchFacesByImage(req.file.buffer);
+
+    if (matches.length === 0) {
+      return res.status(400).json({ error: 'No face detected in the image or no matching photos found' });
+    }
+
+    const matchedFaceIds = matches.map((m) => m.faceId);
+
+    // Find photos in this event that contain the matched faces
+    const photoFaces = await PhotoFace.findAll({
+      where: { rekognition_face_id: matchedFaceIds },
+      include: [{
+        model: Photo,
+        where: { event_id: eventId, status: 'uploaded' },
+        include: [{ model: User, as: 'uploader', attributes: ['id', 'name'] }],
+      }],
+    });
+
+    // Deduplicate photos
+    const uniquePhotos = [];
+    const seenIds = new Set();
+    for (const pf of photoFaces) {
+      if (!seenIds.has(pf.Photo.id)) {
+        seenIds.add(pf.Photo.id);
+        uniquePhotos.push(pf.Photo);
+      }
+    }
+
+    // Generate presigned URLs
+    const photosWithUrls = await Promise.all(uniquePhotos.map(buildPhotoResponse));
+
+    res.json({ photos: photosWithUrls });
+  } catch (err) {
+    console.error('Face search error:', err);
+    res.status(500).json({ error: 'Face search failed' });
   }
 });
 
@@ -139,24 +248,7 @@ router.get('/event/:event_id', authenticate, async (req, res) => {
       order: [['created_at', 'DESC']],
     });
 
-    // Generate presigned download URLs for each photo
-    const photosWithUrls = await Promise.all(photos.map(async (p) => {
-      const [photoUrl, thumbnailUrl] = await Promise.all([
-        getDownloadUrl(p.s3_key),
-        p.thumbnail_key ? getDownloadUrl(p.thumbnail_key) : null,
-      ]);
-      return {
-        id: p.id,
-        event_id: p.event_id,
-        original_filename: p.original_filename,
-        file_size: p.file_size,
-        mime_type: p.mime_type,
-        photo_url: photoUrl,
-        thumbnail_url: thumbnailUrl,
-        uploader: p.uploader,
-        created_at: p.created_at,
-      };
-    }));
+    const photosWithUrls = await Promise.all(photos.map(buildPhotoResponse));
 
     res.json({ photos: photosWithUrls });
   } catch (err) {
@@ -182,11 +274,17 @@ router.delete('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to delete this photo' });
     }
 
+    // Delete Rekognition faces before removing from DB
+    const faces = await PhotoFace.findAll({ where: { photo_id: photo.id } });
+    if (faces.length > 0) {
+      await rekognitionService.deleteFaces(faces.map((f) => f.rekognition_face_id));
+    }
+
     // Delete from S3
     await deleteFile(photo.s3_key);
     if (photo.thumbnail_key) await deleteFile(photo.thumbnail_key);
 
-    // Delete from DB
+    // Delete from DB (CASCADE deletes photo_faces rows)
     await photo.destroy();
 
     res.json({ message: 'Photo deleted successfully' });

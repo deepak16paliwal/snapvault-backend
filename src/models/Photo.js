@@ -14,6 +14,11 @@ const Photo = sequelize.define('Photo', {
     type: DataTypes.ENUM('pending', 'uploaded', 'failed'),
     defaultValue: 'pending',
   },
+  face_index_status: {
+    type: DataTypes.ENUM('pending', 'indexed', 'no_faces', 'failed'),
+    defaultValue: 'pending',
+  },
+  face_indexed_at: { type: DataTypes.DATE },
 }, {
   tableName: 'photos',
   underscored: true,
