@@ -47,6 +47,9 @@ async function buildPhotoResponse(p) {
     thumbnail_url: thumbnailUrl,
     uploader: p.uploader,
     created_at: p.created_at,
+    is_hidden: p.is_hidden ?? false,
+    is_pinned: p.is_pinned ?? false,
+    is_highlighted: p.is_highlighted ?? false,
   };
 }
 
@@ -239,21 +242,57 @@ router.get('/event/:event_id', authenticate, async (req, res) => {
     const event = await Event.findOne({ where: { id: eventId, is_active: true } });
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const member = await isMember(eventId, req.user.id);
-    if (!member) return res.status(403).json({ error: 'You are not a member of this event' });
+    const membership = await EventMember.findOne({ where: { event_id: eventId, user_id: req.user.id } });
+    if (!membership) return res.status(403).json({ error: 'You are not a member of this event' });
+
+    const isOrganizer = membership.role === 'organizer';
+
+    // Organizers see all photos (including hidden); guests only see non-hidden
+    const where = { event_id: eventId, status: 'uploaded' };
+    if (!isOrganizer) where.is_hidden = false;
 
     const photos = await Photo.findAll({
-      where: { event_id: eventId, status: 'uploaded' },
+      where,
       include: [{ model: User, as: 'uploader', attributes: ['id', 'name'] }],
-      order: [['created_at', 'DESC']],
+      order: [
+        ['is_pinned', 'DESC'],
+        ['is_highlighted', 'DESC'],
+        ['created_at', 'DESC'],
+      ],
     });
 
     const photosWithUrls = await Promise.all(photos.map(buildPhotoResponse));
 
-    res.json({ photos: photosWithUrls });
+    res.json({ photos: photosWithUrls, is_organizer: isOrganizer });
   } catch (err) {
     console.error('List photos error:', err);
     res.status(500).json({ error: 'Failed to fetch photos' });
+  }
+});
+
+// PATCH /photos/:id/moderate
+// Organizer-only: hide/pin/highlight a photo
+router.patch('/:id/moderate', authenticate, async (req, res) => {
+  try {
+    const photo = await Photo.findByPk(req.params.id);
+    if (!photo) return res.status(404).json({ error: 'Photo not found' });
+
+    const isOrganizer = await EventMember.findOne({
+      where: { event_id: photo.event_id, user_id: req.user.id, role: 'organizer' },
+    });
+    if (!isOrganizer) return res.status(403).json({ error: 'Only organizers can moderate photos' });
+
+    const updates = {};
+    if (typeof req.body.is_hidden === 'boolean') updates.is_hidden = req.body.is_hidden;
+    if (typeof req.body.is_pinned === 'boolean') updates.is_pinned = req.body.is_pinned;
+    if (typeof req.body.is_highlighted === 'boolean') updates.is_highlighted = req.body.is_highlighted;
+
+    await photo.update(updates);
+
+    res.json({ photo: { id: photo.id, ...updates } });
+  } catch (err) {
+    console.error('Moderate photo error:', err);
+    res.status(500).json({ error: 'Failed to moderate photo' });
   }
 });
 

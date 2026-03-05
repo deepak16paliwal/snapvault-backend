@@ -19,6 +19,9 @@ const Photo = sequelize.define('Photo', {
     defaultValue: 'pending',
   },
   face_indexed_at: { type: DataTypes.DATE },
+  is_hidden: { type: DataTypes.BOOLEAN, defaultValue: false },
+  is_pinned: { type: DataTypes.BOOLEAN, defaultValue: false },
+  is_highlighted: { type: DataTypes.BOOLEAN, defaultValue: false },
 }, {
   tableName: 'photos',
   underscored: true,
