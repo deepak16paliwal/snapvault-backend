@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const path = require('path');
 const router = express.Router();
 
@@ -48,7 +48,7 @@ router.post('/signed-url', authenticate, [
 
     // Build S3 key
     const ext = path.extname(filename).toLowerCase() || '.jpg';
-    const uuid = uuidv4();
+    const uuid = randomUUID();
     const s3Key = `events/${event_id}/photos/${uuid}${ext}`;
     const thumbnailKey = `events/${event_id}/thumbnails/${uuid}.jpg`;
 
