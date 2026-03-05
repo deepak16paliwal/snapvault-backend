@@ -7,6 +7,7 @@ const { up: runMigration2 } = require('./src/migrations/002_create_events');
 const { up: runMigration3 } = require('./src/migrations/003_create_photos');
 const { up: runMigration4 } = require('./src/migrations/004_face_indexing');
 const { up: runMigration5 } = require('./src/migrations/005_photo_moderation');
+const { up: runMigration6 } = require('./src/migrations/006_notifications');
 const { ensureCollection } = require('./src/services/rekognitionService');
 
 async function start() {
@@ -24,6 +25,7 @@ async function start() {
     await runMigration3();
     await runMigration4();
     await runMigration5();
+    await runMigration6();
 
     // Ensure Rekognition collection exists
     await ensureCollection();

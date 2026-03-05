@@ -9,6 +9,7 @@ const { Photo, PhotoFace, Event, EventMember, User } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
 const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile } = require('../services/s3Service');
 const rekognitionService = require('../services/rekognitionService');
+const { sendNotification } = require('../services/notificationService');
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -123,6 +124,28 @@ router.post('/confirm', authenticate, [
 
     await photo.update({ status: 'uploaded' });
 
+    // Notify all event members (except uploader) about new photo — fire-and-forget
+    setImmediate(async () => {
+      try {
+        const event = await Event.findByPk(photo.event_id);
+        const [uploaderUser, members] = await Promise.all([
+          User.findByPk(req.user.id, { attributes: ['name'] }),
+          EventMember.findAll({ where: { event_id: photo.event_id }, attributes: ['user_id'] }),
+        ]);
+        const uploaderName = uploaderUser?.name || 'Organizer';
+        for (const m of members) {
+          if (m.user_id === req.user.id) continue; // skip the uploader
+          await sendNotification({
+            userId: m.user_id,
+            type: 'new_photo',
+            title: event ? event.name : 'New Photo',
+            body: `${uploaderName} added a new photo to the event.`,
+            data: { event_id: photo.event_id, screen: 'gallery' },
+          });
+        }
+      } catch (e) { console.error('[Notif] new_photo error:', e.message); }
+    });
+
     // Generate thumbnail async — don't block response
     setImmediate(async () => {
       try {
@@ -148,6 +171,22 @@ router.post('/confirm', authenticate, [
           );
           await photo.update({ face_index_status: 'indexed', face_indexed_at: new Date() });
           console.log(`[Rekognition] Photo ${photo.id}: indexed ${faces.length} face(s)`);
+          // Notify organizer that face indexing is complete for this photo
+          try {
+            const event = await Event.findByPk(photo.event_id);
+            const organizer = await EventMember.findOne({
+              where: { event_id: photo.event_id, role: 'organizer' },
+            });
+            if (organizer && event) {
+              await sendNotification({
+                userId: organizer.user_id,
+                type: 'face_indexed',
+                title: 'Photos Indexed',
+                body: `${faces.length} face(s) indexed in "${event.name}". Ready for attendee face scan.`,
+                data: { event_id: photo.event_id, screen: 'gallery' },
+              });
+            }
+          } catch (ne) { console.error('[Notif] face_indexed error:', ne.message); }
         } else {
           await photo.update({ face_index_status: 'no_faces' });
           console.log(`[Rekognition] Photo ${photo.id}: no faces detected`);
