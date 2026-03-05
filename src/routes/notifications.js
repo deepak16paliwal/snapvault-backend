@@ -1,6 +1,5 @@
 const express  = require('express');
-const { Op }   = require('sequelize');
-const auth     = require('../middleware/auth');
+const { authenticate } = require('../middleware/authMiddleware');
 const Notification = require('../models/Notification');
 const DeviceToken  = require('../models/DeviceToken');
 
@@ -9,7 +8,7 @@ const router = express.Router();
 // ── GET /notifications ────────────────────────────────────────────────────────
 // Returns up to 50 most recent notifications for the current user.
 // Also returns unread_count for badge.
-router.get('/', auth, async (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const [notifications, unreadCount] = await Promise.all([
       Notification.findAll({
@@ -28,7 +27,7 @@ router.get('/', auth, async (req, res) => {
 
 // ── GET /notifications/unread-count ──────────────────────────────────────────
 // Lightweight poll endpoint for the badge only.
-router.get('/unread-count', auth, async (req, res) => {
+router.get('/unread-count', authenticate, async (req, res) => {
   try {
     const count = await Notification.count({ where: { user_id: req.user.id, is_read: false } });
     res.json({ unread_count: count });
@@ -38,7 +37,7 @@ router.get('/unread-count', auth, async (req, res) => {
 });
 
 // ── PATCH /notifications/:id/read ─────────────────────────────────────────────
-router.patch('/:id/read', auth, async (req, res) => {
+router.patch('/:id/read', authenticate, async (req, res) => {
   try {
     const notif = await Notification.findOne({
       where: { id: req.params.id, user_id: req.user.id },
@@ -52,7 +51,7 @@ router.patch('/:id/read', auth, async (req, res) => {
 });
 
 // ── PATCH /notifications/read-all ─────────────────────────────────────────────
-router.patch('/read-all', auth, async (req, res) => {
+router.patch('/read-all', authenticate, async (req, res) => {
   try {
     await Notification.update(
       { is_read: true },
@@ -66,7 +65,7 @@ router.patch('/read-all', auth, async (req, res) => {
 
 // ── POST /notifications/device-token ─────────────────────────────────────────
 // Register or refresh an FCM device token. Safe to call on every app start.
-router.post('/device-token', auth, async (req, res) => {
+router.post('/device-token', authenticate, async (req, res) => {
   const { fcm_token, platform } = req.body;
   if (!fcm_token || !['ios', 'android'].includes(platform)) {
     return res.status(400).json({ error: 'fcm_token and platform (ios|android) required' });
@@ -85,7 +84,7 @@ router.post('/device-token', auth, async (req, res) => {
 
 // ── DELETE /notifications/device-token ───────────────────────────────────────
 // Unregister token on logout.
-router.delete('/device-token', auth, async (req, res) => {
+router.delete('/device-token', authenticate, async (req, res) => {
   const { fcm_token } = req.body;
   if (!fcm_token) return res.status(400).json({ error: 'fcm_token required' });
   try {
