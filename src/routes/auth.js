@@ -23,11 +23,15 @@ function validate(req, res) {
 router.post('/register', [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('phone')
+    .trim()
+    .notEmpty().withMessage('Phone number is required')
+    .matches(/^\+?[0-9\s\-().]{7,20}$/).withMessage('Enter a valid phone number'),
   body('role').isIn(['end_user', 'organizer']).withMessage('Role must be end_user or organizer'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
-  const { name, email, role } = req.body;
+  const { name, email, phone, role } = req.body;
 
   try {
     const existing = await User.findOne({ where: { email } });
@@ -35,7 +39,7 @@ router.post('/register', [
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    const user = await User.create({ name, email, role });
+    const user = await User.create({ name, email, phone, role });
 
     let emailSent = true;
     try {
