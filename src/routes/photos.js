@@ -12,8 +12,12 @@ const rekognitionService = require('../services/rekognitionService');
 const { sendNotification } = require('../services/notificationService');
 const { checkQuota } = require('../services/quotaService');
 
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/heic', 'image/webp',
+  'video/mp4', 'video/quicktime', 'video/mov',
+];
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024;  // 20 MB
+const MAX_VIDEO_SIZE = 500 * 1024 * 1024; // 500 MB
 
 // Multer: in-memory storage for face-search endpoint (5MB max)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -58,16 +62,22 @@ async function buildPhotoResponse(p) {
 }
 
 // POST /photos/signed-url
-// Get a presigned S3 URL to upload a photo directly from the client
+// Get a presigned S3 URL to upload a photo or video directly from the client
 router.post('/signed-url', authenticate, [
   body('event_id').isInt({ min: 1 }).withMessage('Valid event_id required'),
   body('filename').trim().notEmpty().withMessage('filename required'),
   body('mime_type').isIn(ALLOWED_MIME_TYPES).withMessage('Unsupported file type'),
-  body('file_size').isInt({ min: 1, max: MAX_FILE_SIZE }).withMessage(`Max file size is 20MB`),
+  body('file_size').isInt({ min: 1 }).withMessage('file_size required'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
   const { event_id, filename, mime_type, file_size } = req.body;
+  const isVideo = mime_type.startsWith('video/');
+  const maxSize = isVideo ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
+  if (file_size > maxSize) {
+    const limitLabel = isVideo ? '500 MB' : '20 MB';
+    return res.status(400).json({ error: `Max file size for ${isVideo ? 'video' : 'image'} is ${limitLabel}` });
+  }
 
   try {
     // Verify event is active and user is a member
@@ -82,10 +92,11 @@ router.post('/signed-url', authenticate, [
     if (!quota.allowed) return res.status(402).json({ error: quota.reason });
 
     // Build S3 key
-    const ext = path.extname(filename).toLowerCase() || '.jpg';
+    const ext = path.extname(filename).toLowerCase() || (isVideo ? '.mp4' : '.jpg');
     const uuid = randomUUID();
     const s3Key = `events/${event_id}/photos/${uuid}${ext}`;
-    const thumbnailKey = `events/${event_id}/thumbnails/${uuid}.jpg`;
+    // Videos don't get image thumbnails
+    const thumbnailKey = isVideo ? null : `events/${event_id}/thumbnails/${uuid}.jpg`;
 
     // Create pending photo record — thumbnail_wm_key is set only after successful generation
     const photo = await Photo.create({
@@ -147,7 +158,7 @@ router.post('/confirm', authenticate, [
           await sendNotification({
             userId: m.user_id,
             type: 'new_photo',
-            title: event ? event.name : 'New Photo',
+            title: event ? event.title : 'New Photo',
             body: `${uploaderName} added a new photo to the event.`,
             data: { event_id: photo.event_id, screen: 'gallery' },
           });
@@ -155,24 +166,27 @@ router.post('/confirm', authenticate, [
       } catch (e) { console.error('[Notif] new_photo error:', e.message); }
     });
 
-    // Generate thumbnail async — don't block response
+    // Generate thumbnail async — don't block response (skip for videos)
     setImmediate(async () => {
-      try {
-        await generateThumbnail(photo.s3_key, photo.thumbnail_key);
-      } catch (thumbErr) {
-        console.error('Thumbnail generation failed:', thumbErr.message);
+      if (photo.thumbnail_key) {
+        try {
+          await generateThumbnail(photo.s3_key, photo.thumbnail_key);
+        } catch (thumbErr) {
+          console.error('Thumbnail generation failed:', thumbErr.message);
+        }
+
+        // Generate watermarked thumbnail and update DB only if successful
+        try {
+          const wmKey = photo.thumbnail_key.replace('/thumbnails/', '/thumbnails-wm/');
+          await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey);
+          await photo.update({ thumbnail_wm_key: wmKey });
+        } catch (wmErr) {
+          console.error('Watermark generation failed:', wmErr.message);
+        }
       }
 
-      // Generate watermarked thumbnail and update DB only if successful
-      try {
-        const wmKey = photo.thumbnail_key.replace('/thumbnails/', '/thumbnails-wm/');
-        await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey);
-        await photo.update({ thumbnail_wm_key: wmKey });
-      } catch (wmErr) {
-        console.error('Watermark generation failed:', wmErr.message);
-      }
-
-      // Face indexing — runs after thumbnail attempt regardless
+      // Face indexing — images only
+      if (photo.mime_type && photo.mime_type.startsWith('video/')) return;
       try {
         const faces = await rekognitionService.indexFaces(
           process.env.AWS_S3_BUCKET,
@@ -200,7 +214,7 @@ router.post('/confirm', authenticate, [
                 userId: organizer.user_id,
                 type: 'face_indexed',
                 title: 'Photos Indexed',
-                body: `${faces.length} face(s) indexed in "${event.name}". Ready for attendee face scan.`,
+                body: `${faces.length} face(s) indexed in "${event.title}". Ready for attendee face scan.`,
                 data: { event_id: photo.event_id, screen: 'gallery' },
               });
             }
