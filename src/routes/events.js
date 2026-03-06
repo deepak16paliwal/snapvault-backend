@@ -3,10 +3,12 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
 
-const { Event, EventMember, User } = require('../models');
+const { Event, EventMember, User, Photo } = require('../models');
+const sequelize = require('../config/database');
 const { authenticate, requireRole } = require('../middleware/authMiddleware');
 const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/emailService');
-const { presignStoredUrl } = require('../services/s3Service');
+const { presignStoredUrl, getUploadUrl } = require('../services/s3Service');
+const env = require('../config/env');
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -71,12 +73,38 @@ router.get('/', authenticate, async (req, res) => {
       }],
     });
 
-    const events = memberships.map(m => ({
+    const eventIds = memberships.map(m => m.Event.id);
+
+    // Fetch aggregated stats for all events in one go (avoids N+1)
+    let memberCounts = {}, photoCounts = {}, scanTotals = {};
+    if (eventIds.length > 0) {
+      const [memberRows] = await sequelize.query(
+        `SELECT event_id, COUNT(*) as cnt FROM event_members WHERE event_id IN (:ids) GROUP BY event_id`,
+        { replacements: { ids: eventIds } }
+      );
+      const [photoRows] = await sequelize.query(
+        `SELECT event_id, COUNT(*) as cnt FROM photos WHERE event_id IN (:ids) GROUP BY event_id`,
+        { replacements: { ids: eventIds } }
+      );
+      const [scanRows] = await sequelize.query(
+        `SELECT event_id, SUM(face_scan_count) as total FROM event_members WHERE event_id IN (:ids) GROUP BY event_id`,
+        { replacements: { ids: eventIds } }
+      );
+      memberRows.forEach(r => { memberCounts[r.event_id] = parseInt(r.cnt, 10); });
+      photoRows.forEach(r => { photoCounts[r.event_id] = parseInt(r.cnt, 10); });
+      scanRows.forEach(r => { scanTotals[r.event_id] = parseInt(r.total, 10) || 0; });
+    }
+
+    const events = await Promise.all(memberships.map(async m => ({
       ...m.Event.toJSON(),
+      cover_photo_url: await presignStoredUrl(m.Event.cover_photo_url),
       my_role: m.role,
       my_access_type: m.access_type,
       my_face_scan_count: m.face_scan_count,
-    }));
+      member_count: memberCounts[m.Event.id] || 0,
+      photo_count: photoCounts[m.Event.id] || 0,
+      total_scans: scanTotals[m.Event.id] || 0,
+    })));
 
     res.json({ events });
   } catch (err) {
@@ -142,6 +170,7 @@ router.get('/:id', authenticate, async (req, res) => {
     res.json({
       event: {
         ...event.toJSON(),
+        cover_photo_url: await presignStoredUrl(event.cover_photo_url),
         invite_link: membership.role === 'organizer'
           ? `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`
           : undefined,
@@ -192,6 +221,26 @@ router.patch('/:id', authenticate, requireRole('organizer'), [
   } catch (err) {
     console.error('Update event error:', err);
     res.status(500).json({ error: 'Failed to update event' });
+  }
+});
+
+// POST /events/:id/cover-photo-url — Get presigned URL to upload event cover photo (organizer only)
+router.post('/:id/cover-photo-url', authenticate, requireRole('organizer'), async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const { filename, mime_type } = req.body;
+    const ext = (filename || 'cover').split('.').pop() || 'jpg';
+    const key = `events/${event.id}/cover/${Date.now()}.${ext}`;
+    const uploadUrl = await getUploadUrl(key, mime_type || 'image/jpeg');
+    const photoUrl = `https://${env.aws.s3Bucket}.s3.${env.aws.region}.amazonaws.com/${key}`;
+    res.json({ upload_url: uploadUrl, photo_url: photoUrl });
+  } catch (err) {
+    console.error('Cover photo URL error:', err);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
   }
 });
 
