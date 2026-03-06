@@ -5,11 +5,12 @@ const path = require('path');
 const multer = require('multer');
 const router = express.Router();
 
-const { Photo, PhotoFace, Event, EventMember, User } = require('../models');
+const { Photo, PhotoFace, FaceRejection, Event, EventMember, User } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
-const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile } = require('../services/s3Service');
+const { getUploadUrl, getDownloadUrl, generateThumbnail, generateWatermarkedThumbnail, deleteFile } = require('../services/s3Service');
 const rekognitionService = require('../services/rekognitionService');
 const { sendNotification } = require('../services/notificationService');
+const { checkQuota } = require('../services/quotaService');
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -34,9 +35,10 @@ async function isMember(eventId, userId) {
 
 // Helper: build photo response with presigned URLs (reused in multiple endpoints)
 async function buildPhotoResponse(p) {
-  const [photoUrl, thumbnailUrl] = await Promise.all([
+  const [photoUrl, thumbnailUrl, thumbnailWmUrl] = await Promise.all([
     getDownloadUrl(p.s3_key),
     p.thumbnail_key ? getDownloadUrl(p.thumbnail_key) : null,
+    p.thumbnail_wm_key ? getDownloadUrl(p.thumbnail_wm_key) : null,
   ]);
   return {
     id: p.id,
@@ -46,6 +48,7 @@ async function buildPhotoResponse(p) {
     mime_type: p.mime_type,
     photo_url: photoUrl,
     thumbnail_url: thumbnailUrl,
+    thumbnail_wm_url: thumbnailWmUrl,
     uploader: p.uploader,
     created_at: p.created_at,
     is_hidden: p.is_hidden ?? false,
@@ -74,13 +77,17 @@ router.post('/signed-url', authenticate, [
     const member = await isMember(event_id, req.user.id);
     if (!member) return res.status(403).json({ error: 'You are not a member of this event' });
 
+    // Check upload quota against subscription plan
+    const quota = await checkQuota(req.user, mime_type);
+    if (!quota.allowed) return res.status(402).json({ error: quota.reason });
+
     // Build S3 key
     const ext = path.extname(filename).toLowerCase() || '.jpg';
     const uuid = randomUUID();
     const s3Key = `events/${event_id}/photos/${uuid}${ext}`;
     const thumbnailKey = `events/${event_id}/thumbnails/${uuid}.jpg`;
 
-    // Create pending photo record
+    // Create pending photo record — thumbnail_wm_key is set only after successful generation
     const photo = await Photo.create({
       event_id,
       uploader_id: req.user.id,
@@ -113,7 +120,7 @@ router.post('/confirm', authenticate, [
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
-  const { photo_id } = req.body;
+  const { photo_id, stored_size_bytes } = req.body;
 
   try {
     const photo = await Photo.findOne({
@@ -122,7 +129,9 @@ router.post('/confirm', authenticate, [
 
     if (!photo) return res.status(404).json({ error: 'Photo not found or already confirmed' });
 
-    await photo.update({ status: 'uploaded' });
+    const updateData = { status: 'uploaded' };
+    if (stored_size_bytes) updateData.stored_size_bytes = stored_size_bytes;
+    await photo.update(updateData);
 
     // Notify all event members (except uploader) about new photo — fire-and-forget
     setImmediate(async () => {
@@ -152,6 +161,15 @@ router.post('/confirm', authenticate, [
         await generateThumbnail(photo.s3_key, photo.thumbnail_key);
       } catch (thumbErr) {
         console.error('Thumbnail generation failed:', thumbErr.message);
+      }
+
+      // Generate watermarked thumbnail and update DB only if successful
+      try {
+        const wmKey = photo.thumbnail_key.replace('/thumbnails/', '/thumbnails-wm/');
+        await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey);
+        await photo.update({ thumbnail_wm_key: wmKey });
+      } catch (wmErr) {
+        console.error('Watermark generation failed:', wmErr.message);
       }
 
       // Face indexing — runs after thumbnail attempt regardless
@@ -230,14 +248,40 @@ router.post('/face-search', authenticate, upload.single('image'), [
     const event = await Event.findOne({ where: { id: eventId, is_active: true } });
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const member = await isMember(eventId, req.user.id);
-    if (!member) return res.status(403).json({ error: 'You are not a member of this event' });
+    const membership = await EventMember.findOne({ where: { event_id: eventId, user_id: req.user.id } });
+    if (!membership) return res.status(403).json({ error: 'You are not a member of this event' });
+
+    // Enforce 2-scan limit for non-organizers
+    const SCAN_LIMIT = 2;
+    if (membership.role !== 'organizer' && membership.face_scan_count >= SCAN_LIMIT) {
+      return res.status(429).json({
+        error: `Scan limit reached. Each member can only scan ${SCAN_LIMIT} times per event.`,
+        scans_used: membership.face_scan_count,
+        scans_remaining: 0,
+      });
+    }
+
+    // Count the scan BEFORE calling Rekognition — AWS charges per API call regardless of result
+    if (membership.role !== 'organizer') {
+      try {
+        await membership.increment('face_scan_count');
+        console.log(`[FaceScan] user ${req.user.id} event ${eventId}: face_scan_count incremented`);
+      } catch (incErr) {
+        console.error(`[FaceScan] Failed to increment face_scan_count for user ${req.user.id}:`, incErr.message);
+        // Continue — don't fail the face search just because the count update failed
+      }
+    }
+    const usedCount = membership.face_scan_count + (membership.role !== 'organizer' ? 1 : 0);
+    const scansRemaining = membership.role !== 'organizer' ? Math.max(0, SCAN_LIMIT - usedCount) : null;
 
     // Search Rekognition collection with the selfie
     const matches = await rekognitionService.searchFacesByImage(req.file.buffer);
 
     if (matches.length === 0) {
-      return res.status(400).json({ error: 'No face detected in the image or no matching photos found' });
+      return res.status(400).json({
+        error: 'No face detected in the image or no matching photos found',
+        scans_remaining: scansRemaining,
+      });
     }
 
     const matchedFaceIds = matches.map((m) => m.faceId);
@@ -262,10 +306,18 @@ router.post('/face-search', authenticate, upload.single('image'), [
       }
     }
 
-    // Generate presigned URLs
-    const photosWithUrls = await Promise.all(uniquePhotos.map(buildPhotoResponse));
+    // Filter out photos this user has already rejected as "Not Me"
+    const rejections = await FaceRejection.findAll({
+      where: { user_id: req.user.id, photo_id: uniquePhotos.map((p) => p.id) },
+      attributes: ['photo_id'],
+    });
+    const rejectedIds = new Set(rejections.map((r) => r.photo_id));
+    const filteredPhotos = uniquePhotos.filter((p) => !rejectedIds.has(p.id));
 
-    res.json({ photos: photosWithUrls });
+    // Generate presigned URLs
+    const photosWithUrls = await Promise.all(filteredPhotos.map(buildPhotoResponse));
+
+    res.json({ photos: photosWithUrls, scans_used: usedCount, scans_remaining: scansRemaining });
   } catch (err) {
     console.error('Face search error:', err);
     res.status(500).json({ error: 'Face search failed' });
@@ -283,6 +335,11 @@ router.get('/event/:event_id', authenticate, async (req, res) => {
 
     const membership = await EventMember.findOne({ where: { event_id: eventId, user_id: req.user.id } });
     if (!membership) return res.status(403).json({ error: 'You are not a member of this event' });
+
+    // Partial-access members can only find their own photos via face scan
+    if (membership.access_type === 'partial') {
+      return res.status(403).json({ error: 'Use Face Scan to find your photos in this event.' });
+    }
 
     const isOrganizer = membership.role === 'organizer';
 
@@ -332,6 +389,22 @@ router.patch('/:id/moderate', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Moderate photo error:', err);
     res.status(500).json({ error: 'Failed to moderate photo' });
+  }
+});
+
+// POST /photos/:id/reject-face
+// Guest marks a photo as "Not Me" — excludes it from their future face search results
+router.post('/:id/reject-face', authenticate, async (req, res) => {
+  try {
+    const photo = await Photo.findByPk(req.params.id);
+    if (!photo) return res.status(404).json({ error: 'Photo not found' });
+    const member = await isMember(photo.event_id, req.user.id);
+    if (!member) return res.status(403).json({ error: 'Not a member of this event' });
+    await FaceRejection.findOrCreate({ where: { user_id: req.user.id, photo_id: photo.id } });
+    res.json({ message: 'Photo rejected from your face search results' });
+  } catch (err) {
+    console.error('Face rejection error:', err);
+    res.status(500).json({ error: 'Failed to reject photo' });
   }
 });
 

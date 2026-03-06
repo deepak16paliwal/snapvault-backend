@@ -8,7 +8,9 @@ const Photo = sequelize.define('Photo', {
   original_filename: { type: DataTypes.STRING(255) },
   s3_key: { type: DataTypes.STRING(512), allowNull: false },
   thumbnail_key: { type: DataTypes.STRING(512) },
-  file_size: { type: DataTypes.INTEGER },
+  thumbnail_wm_key: { type: DataTypes.STRING(500) },
+  file_size: { type: DataTypes.BIGINT },         // original file size (shown to user)
+  stored_size_bytes: { type: DataTypes.BIGINT },  // compressed size actually on S3
   mime_type: { type: DataTypes.STRING(100) },
   status: {
     type: DataTypes.ENUM('pending', 'uploaded', 'failed'),

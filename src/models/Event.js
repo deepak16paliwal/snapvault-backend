@@ -10,6 +10,7 @@ const Event = sequelize.define('Event', {
   location: { type: DataTypes.STRING(512) },
   cover_photo_url: { type: DataTypes.STRING(512) },
   invite_token: { type: DataTypes.STRING(64), unique: true, allowNull: false },
+  expires_at: { type: DataTypes.DATE, allowNull: true },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
 }, {
   tableName: 'events',

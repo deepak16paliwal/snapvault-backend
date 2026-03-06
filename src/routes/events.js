@@ -6,6 +6,7 @@ const router = express.Router();
 const { Event, EventMember, User } = require('../models');
 const { authenticate, requireRole } = require('../middleware/authMiddleware');
 const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/emailService');
+const { presignStoredUrl } = require('../services/s3Service');
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -23,10 +24,11 @@ router.post('/', authenticate, requireRole('organizer'), [
   body('event_date').optional().isDate().withMessage('Invalid date (YYYY-MM-DD)'),
   body('location').optional().trim(),
   body('cover_photo_url').optional().isURL().withMessage('Invalid URL'),
+  body('expires_at').optional().isISO8601().withMessage('Invalid expires_at (ISO 8601)'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
-  const { title, description, event_date, location, cover_photo_url } = req.body;
+  const { title, description, event_date, location, cover_photo_url, expires_at } = req.body;
 
   try {
     const invite_token = crypto.randomBytes(32).toString('hex');
@@ -39,13 +41,15 @@ router.post('/', authenticate, requireRole('organizer'), [
       location,
       cover_photo_url,
       invite_token,
+      expires_at: expires_at || null,
     });
 
-    // Add organizer as member automatically
+    // Add organizer as member automatically (full access)
     await EventMember.create({
       event_id: event.id,
       user_id: req.user.id,
       role: 'organizer',
+      access_type: 'full',
     });
 
     res.status(201).json({ event });
@@ -70,6 +74,8 @@ router.get('/', authenticate, async (req, res) => {
     const events = memberships.map(m => ({
       ...m.Event.toJSON(),
       my_role: m.role,
+      my_access_type: m.access_type,
+      my_face_scan_count: m.face_scan_count,
     }));
 
     res.json({ events });
@@ -95,7 +101,7 @@ router.post('/join/:token', authenticate, async (req, res) => {
     });
 
     if (existing) {
-      return res.status(409).json({ error: 'You are already a member of this event' });
+      return res.status(409).json({ error: 'You are already a member of this event', event_id: event.id });
     }
 
     await EventMember.create({
@@ -141,6 +147,8 @@ router.get('/:id', authenticate, async (req, res) => {
           : undefined,
       },
       my_role: membership.role,
+      my_access_type: membership.access_type,
+      my_face_scan_count: membership.face_scan_count,
     });
   } catch (err) {
     console.error('Get event error:', err);
@@ -155,6 +163,7 @@ router.patch('/:id', authenticate, requireRole('organizer'), [
   body('event_date').optional().isDate().withMessage('Invalid date (YYYY-MM-DD)'),
   body('location').optional().trim(),
   body('cover_photo_url').optional().isURL().withMessage('Invalid URL'),
+  body('expires_at').optional().isISO8601().withMessage('Invalid expires_at (ISO 8601)'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
@@ -167,13 +176,14 @@ router.patch('/:id', authenticate, requireRole('organizer'), [
       return res.status(404).json({ error: 'Event not found or not authorized' });
     }
 
-    const { title, description, event_date, location, cover_photo_url } = req.body;
+    const { title, description, event_date, location, cover_photo_url, expires_at } = req.body;
     const updates = {};
     if (title !== undefined) updates.title = title;
     if (description !== undefined) updates.description = description;
     if (event_date !== undefined) updates.event_date = event_date;
     if (location !== undefined) updates.location = location;
     if (cover_photo_url !== undefined) updates.cover_photo_url = cover_photo_url;
+    if (expires_at !== undefined) updates.expires_at = expires_at;
 
     await event.update(updates);
     await event.reload();
@@ -207,6 +217,7 @@ router.delete('/:id', authenticate, requireRole('organizer'), async (req, res) =
 // POST /events/:id/add-member — Organizer adds a member by email
 router.post('/:id/add-member', authenticate, requireRole('organizer'), [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('access_type').optional().isIn(['full', 'partial']).withMessage('access_type must be full or partial'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
@@ -217,7 +228,7 @@ router.post('/:id/add-member', authenticate, requireRole('organizer'), [
     if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
 
     const inviteLink = `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`;
-    const { email } = req.body;
+    const { email, access_type } = req.body;
 
     const targetUser = await User.findOne({ where: { email, is_active: true } });
 
@@ -242,8 +253,13 @@ router.post('/:id/add-member', authenticate, requireRole('organizer'), [
       return res.status(409).json({ error: 'This user is already a member of the event' });
     }
 
-    // Add as guest member
-    await EventMember.create({ event_id: event.id, user_id: targetUser.id, role: 'guest' });
+    // Add as guest member with chosen access type
+    await EventMember.create({
+      event_id: event.id,
+      user_id: targetUser.id,
+      role: 'guest',
+      access_type: access_type || 'partial',
+    });
 
     // Send notification email (non-blocking)
     sendAddedToEventEmail(targetUser.email, event.title, req.user.name).catch((err) =>
@@ -257,6 +273,54 @@ router.post('/:id/add-member', authenticate, requireRole('organizer'), [
   } catch (err) {
     console.error('Add member error:', err);
     res.status(500).json({ error: 'Failed to add member' });
+  }
+});
+
+// PATCH /events/:id/members/:userId — Update member access type (organizer only)
+router.patch('/:id/members/:userId', authenticate, requireRole('organizer'), [
+  body('access_type').isIn(['full', 'partial']).withMessage('access_type must be full or partial'),
+], async (req, res) => {
+  if (!validate(req, res)) return;
+
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const member = await EventMember.findOne({
+      where: { event_id: event.id, user_id: req.params.userId },
+    });
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    if (member.role === 'organizer') return res.status(400).json({ error: 'Cannot change organizer access type' });
+
+    await member.update({ access_type: req.body.access_type });
+    res.json({ message: 'Access type updated', access_type: req.body.access_type });
+  } catch (err) {
+    console.error('Update member error:', err);
+    res.status(500).json({ error: 'Failed to update member' });
+  }
+});
+
+// DELETE /events/:id/members/:userId — Remove member from event (organizer only)
+router.delete('/:id/members/:userId', authenticate, requireRole('organizer'), async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const member = await EventMember.findOne({
+      where: { event_id: event.id, user_id: req.params.userId },
+    });
+    if (!member) return res.status(404).json({ error: 'Member not found' });
+    if (member.role === 'organizer') return res.status(400).json({ error: 'Cannot remove organizer from event' });
+
+    await member.destroy();
+    res.json({ message: 'Member removed from event' });
+  } catch (err) {
+    console.error('Remove member error:', err);
+    res.status(500).json({ error: 'Failed to remove member' });
   }
 });
 
@@ -276,13 +340,18 @@ router.get('/:id/members', authenticate, requireRole('organizer'), async (req, r
       include: [{ model: User, attributes: ['id', 'name', 'email', 'profile_photo_url'] }],
     });
 
-    res.json({
-      members: members.map(m => ({
-        ...m.User.toJSON(),
+    const membersWithUrls = await Promise.all(members.map(async (m) => {
+      const user = m.User.toJSON();
+      return {
+        ...user,
+        profile_photo_url: await presignStoredUrl(user.profile_photo_url),
         member_role: m.role,
+        access_type: m.access_type,
         joined_at: m.joined_at,
-      })),
-    });
+      };
+    }));
+
+    res.json({ members: membersWithUrls });
   } catch (err) {
     console.error('List members error:', err);
     res.status(500).json({ error: 'Failed to fetch members' });

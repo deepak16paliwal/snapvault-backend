@@ -43,7 +43,7 @@ const User = sequelize.define('User', {
     defaultValue: true,
   },
   subscription_plan: {
-    type: DataTypes.ENUM('free', 'pro_monthly', 'pro_annual', 'enterprise_monthly', 'enterprise_annual'),
+    type: DataTypes.ENUM('free', 'basic', 'standard', 'essential', 'premium'),
     defaultValue: 'free',
   },
 }, {

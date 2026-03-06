@@ -3,6 +3,9 @@ const Event = require('./Event');
 const EventMember = require('./EventMember');
 const Photo = require('./Photo');
 const PhotoFace = require('./PhotoFace');
+const FaceRejection = require('./FaceRejection');
+const Plan = require('./Plan');
+const Subscription = require('./Subscription');
 
 // Event <-> User (organizer)
 Event.belongsTo(User, { foreignKey: 'organizer_id', as: 'organizer' });
@@ -26,4 +29,14 @@ User.hasMany(Photo, { foreignKey: 'uploader_id' });
 Photo.hasMany(PhotoFace, { foreignKey: 'photo_id' });
 PhotoFace.belongsTo(Photo, { foreignKey: 'photo_id' });
 
-module.exports = { User, Event, EventMember, Photo, PhotoFace };
+// FaceRejection <-> User + Photo
+FaceRejection.belongsTo(User, { foreignKey: 'user_id' });
+FaceRejection.belongsTo(Photo, { foreignKey: 'photo_id' });
+
+// Subscription <-> User + Plan
+User.hasMany(Subscription, { foreignKey: 'user_id' });
+Subscription.belongsTo(User, { foreignKey: 'user_id' });
+Subscription.belongsTo(Plan, { foreignKey: 'plan_key', targetKey: 'plan_key' });
+Plan.hasMany(Subscription, { foreignKey: 'plan_key', sourceKey: 'plan_key' });
+
+module.exports = { User, Event, EventMember, Photo, PhotoFace, FaceRejection, Plan, Subscription };

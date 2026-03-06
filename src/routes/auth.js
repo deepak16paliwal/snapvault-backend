@@ -7,6 +7,10 @@ const { storeOtp, verifyOtp } = require('../services/otpService');
 const { sendOtpEmail } = require('../services/emailService');
 const { signToken } = require('../services/jwtService');
 const { authenticate } = require('../middleware/authMiddleware');
+const { getUploadUrl, presignStoredUrl } = require('../services/s3Service');
+const env = require('../config/env');
+
+const presignProfilePhoto = presignStoredUrl;
 
 // Helper: return first validation error
 function validate(req, res) {
@@ -150,7 +154,7 @@ router.get('/me', authenticate, async (req, res) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      profile_photo_url: user.profile_photo_url,
+      profile_photo_url: await presignProfilePhoto(user.profile_photo_url),
       date_of_birth: user.date_of_birth,
       email_verified: user.email_verified,
       subscription_plan: user.subscription_plan,
@@ -186,13 +190,29 @@ router.patch('/profile', authenticate, [
         name: req.user.name,
         email: req.user.email,
         phone: req.user.phone,
-        profile_photo_url: req.user.profile_photo_url,
+        profile_photo_url: await presignProfilePhoto(req.user.profile_photo_url),
         date_of_birth: req.user.date_of_birth,
       },
     });
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// POST /auth/profile/photo-url
+// Generate a presigned S3 URL for uploading a profile photo
+router.post('/profile/photo-url', authenticate, async (req, res) => {
+  try {
+    const { filename, mime_type } = req.body;
+    const ext = (filename || 'photo').split('.').pop() || 'jpg';
+    const key = `profiles/${req.user.id}/${Date.now()}.${ext}`;
+    const uploadUrl = await getUploadUrl(key, mime_type || 'image/jpeg');
+    const photoUrl = `https://${env.aws.s3Bucket}.s3.${env.aws.region}.amazonaws.com/${key}`;
+    res.json({ upload_url: uploadUrl, photo_url: photoUrl });
+  } catch (err) {
+    console.error('Profile photo URL error:', err);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
   }
 });
 
