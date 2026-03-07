@@ -71,4 +71,64 @@ async function sendEventInviteEmail(toEmail, eventTitle, organizerName, inviteLi
   });
 }
 
-module.exports = { sendOtpEmail, sendAddedToEventEmail, sendEventInviteEmail };
+async function sendSubscriptionExpiryWarning(toEmail, planName, expiryDate) {
+  const formatted = expiryDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: `Your SnapVault ${planName} plan expires in 7 days`,
+    text: `Hi,\n\nYour SnapVault ${planName} plan will expire on ${formatted}.\n\nRenew now to keep your photos, events, and features active.\n\n— The SnapVault Team`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+        <h2 style="color: #1a1a2e;">Your plan expires soon</h2>
+        <p>Your <strong>${planName}</strong> plan on SnapVault will expire on <strong>${formatted}</strong>.</p>
+        <p>Renew now to continue enjoying your storage, events, and features without interruption.</p>
+        <p style="color: #888; font-size: 12px; margin-top: 20px;">— The SnapVault Team</p>
+      </div>
+    `,
+  });
+}
+
+async function sendPaymentFailedEmail(toEmail, planName) {
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: 'SnapVault payment failed — action required',
+    text: `Hi,\n\nWe were unable to process your payment for the ${planName} plan.\n\nYou have a 15-day grace period to complete your payment. After that, your account will be downgraded to the Free plan.\n\nOpen the app to retry your payment.\n\n— The SnapVault Team`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+        <h2 style="color: #dc2626;">Payment failed</h2>
+        <p>We were unable to process your payment for the <strong>${planName}</strong> plan.</p>
+        <p>You have a <strong>15-day grace period</strong> to complete your payment. After that, your account will be downgraded to the Free plan.</p>
+        <p>Open the SnapVault app to retry your payment.</p>
+        <p style="color: #888; font-size: 12px; margin-top: 20px;">— The SnapVault Team</p>
+      </div>
+    `,
+  });
+}
+
+async function sendGracePeriodExpiredEmail(toEmail) {
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: 'Your SnapVault subscription has ended',
+    text: `Hi,\n\nYour grace period has ended and your account has been downgraded to the Free plan.\n\nYour photos and events are safe, but some premium features are now limited. Renew anytime to restore full access.\n\n— The SnapVault Team`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+        <h2 style="color: #1a1a2e;">Your subscription has ended</h2>
+        <p>Your grace period has ended. Your account has been downgraded to the <strong>Free</strong> plan.</p>
+        <p>Your photos and events are safe, but premium features are now limited. Renew anytime to restore full access.</p>
+        <p style="color: #888; font-size: 12px; margin-top: 20px;">— The SnapVault Team</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = {
+  sendOtpEmail,
+  sendAddedToEventEmail,
+  sendEventInviteEmail,
+  sendSubscriptionExpiryWarning,
+  sendPaymentFailedEmail,
+  sendGracePeriodExpiredEmail,
+};

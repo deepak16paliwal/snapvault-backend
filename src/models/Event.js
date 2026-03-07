@@ -12,6 +12,7 @@ const Event = sequelize.define('Event', {
   invite_token: { type: DataTypes.STRING(64), unique: true, allowNull: false },
   expires_at: { type: DataTypes.DATE, allowNull: true },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  soft_deleted_at: { type: DataTypes.DATE, allowNull: true },
 }, {
   tableName: 'events',
   underscored: true,
