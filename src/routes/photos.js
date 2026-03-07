@@ -5,12 +5,13 @@ const path = require('path');
 const multer = require('multer');
 const router = express.Router();
 
-const { Photo, PhotoFace, FaceRejection, Event, EventMember, User } = require('../models');
+const { Photo, PhotoFace, FaceRejection, Event, EventMember, User, Subscription, Plan } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
-const { getUploadUrl, getDownloadUrl, generateThumbnail, generateWatermarkedThumbnail, deleteFile } = require('../services/s3Service');
+const { getUploadUrl, getDownloadUrl, generateThumbnail, generateWatermarkedThumbnail, deleteFile, downloadBuffer } = require('../services/s3Service');
+const archiver = require('archiver');
 const rekognitionService = require('../services/rekognitionService');
 const { sendNotification } = require('../services/notificationService');
-const { checkQuota } = require('../services/quotaService');
+const { checkQuota, getPlanLimits } = require('../services/quotaService');
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg', 'image/png', 'image/heic', 'image/webp',
@@ -148,17 +149,12 @@ router.post('/confirm', authenticate, [
     setImmediate(async () => {
       try {
         const event = await Event.findByPk(photo.event_id);
-        const [uploaderUser, members] = await Promise.all([
+        const [uploaderUser, membersWithScan] = await Promise.all([
           User.findByPk(req.user.id, { attributes: ['name'] }),
-          EventMember.findAll({ where: { event_id: photo.event_id }, attributes: ['user_id'] }),
+          EventMember.findAll({ where: { event_id: photo.event_id }, attributes: ['user_id', 'face_scan_count'] }),
         ]);
         const uploaderName = uploaderUser?.name || 'Someone';
         const eventTitle = event ? event.title : 'the event';
-        // Re-fetch members with face_scan_count to differentiate notification types
-        const membersWithScan = await EventMember.findAll({
-          where: { event_id: photo.event_id },
-          attributes: ['user_id', 'face_scan_count'],
-        });
         for (const m of membersWithScan) {
           if (m.user_id === req.user.id) continue; // skip the uploader
           const hasScanned = (m.face_scan_count || 0) > 0;
@@ -184,10 +180,25 @@ router.post('/confirm', authenticate, [
           console.error('Thumbnail generation failed:', thumbErr.message);
         }
 
-        // Generate watermarked thumbnail and update DB only if successful
+        // Generate watermarked thumbnail with plan-based watermark text
         try {
           const wmKey = photo.thumbnail_key.replace('/thumbnails/', '/thumbnails-wm/');
-          await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey);
+          let watermarkText = 'SnapVault';
+          try {
+            const wmEvent = await Event.findByPk(photo.event_id, { attributes: ['organizer_id'] });
+            if (wmEvent) {
+              const sub = await Subscription.findOne({
+                where: { user_id: wmEvent.organizer_id, status: 'active' },
+                include: [{ model: Plan, attributes: ['plan_key'] }],
+              });
+              const planKey = sub?.Plan?.plan_key || 'free';
+              if (['essential', 'premium'].includes(planKey)) {
+                const organizer = await User.findByPk(wmEvent.organizer_id, { attributes: ['name'] });
+                watermarkText = organizer?.name || 'SnapVault';
+              }
+            }
+          } catch (_) { /* fall back to default */ }
+          await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey, watermarkText);
           await photo.update({ thumbnail_wm_key: wmKey });
         } catch (wmErr) {
           console.error('Watermark generation failed:', wmErr.message);
@@ -348,9 +359,14 @@ router.post('/face-search', authenticate, upload.single('image'), [
 });
 
 // GET /photos/event/:event_id
-// List all uploaded photos for an event (members only)
+// List uploaded photos for an event (members only), with pagination and sort
+// Query params: page (default 1), limit (default 30, max 100), sort (newest|oldest, default newest)
 router.get('/event/:event_id', authenticate, async (req, res) => {
   const eventId = parseInt(req.params.event_id);
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
+  const sort = req.query.sort === 'oldest' ? 'ASC' : 'DESC';
+  const offset = (page - 1) * limit;
 
   try {
     const event = await Event.findOne({ where: { id: eventId, is_active: true } });
@@ -370,19 +386,26 @@ router.get('/event/:event_id', authenticate, async (req, res) => {
     const where = { event_id: eventId, status: 'uploaded' };
     if (!isOrganizer) where.is_hidden = false;
 
-    const photos = await Photo.findAll({
+    const { count, rows: photos } = await Photo.findAndCountAll({
       where,
       include: [{ model: User, as: 'uploader', attributes: ['id', 'name'] }],
       order: [
         ['is_pinned', 'DESC'],
         ['is_highlighted', 'DESC'],
-        ['created_at', 'DESC'],
+        ['created_at', sort],
       ],
+      limit,
+      offset,
     });
 
     const photosWithUrls = await Promise.all(photos.map(buildPhotoResponse));
+    const totalPages = Math.ceil(count / limit);
 
-    res.json({ photos: photosWithUrls, is_organizer: isOrganizer });
+    res.json({
+      photos: photosWithUrls,
+      is_organizer: isOrganizer,
+      pagination: { page, limit, total: count, total_pages: totalPages, has_next: page < totalPages },
+    });
   } catch (err) {
     console.error('List photos error:', err);
     res.status(500).json({ error: 'Failed to fetch photos' });
@@ -465,6 +488,65 @@ router.delete('/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Delete photo error:', err);
     res.status(500).json({ error: 'Failed to delete photo' });
+  }
+});
+
+// POST /photos/download-zip
+// Download a batch of photos as a ZIP. Requires bulk_download plan feature.
+// Body: { photo_ids: [1, 2, ...] }
+router.post('/download-zip', authenticate, [
+  body('photo_ids').isArray({ min: 1, max: 100 }).withMessage('photo_ids must be a non-empty array (max 100)'),
+], async (req, res) => {
+  if (!validate(req, res)) return;
+
+  try {
+    const limits = await getPlanLimits(req.user.subscription_plan || 'free');
+    if (!limits?.bulk_download) {
+      return res.status(403).json({ error: 'Bulk download is available on Standard plan and above. Upgrade to continue.' });
+    }
+
+    const photoIds = req.body.photo_ids.map(Number).filter(Boolean);
+    const photos = await Photo.findAll({
+      where: { id: photoIds, status: 'uploaded' },
+      include: [{ model: EventMember, as: null, required: false }],
+    });
+
+    // Verify membership for all events referenced
+    const eventIds = [...new Set(photos.map((p) => p.event_id))];
+    const memberships = await EventMember.findAll({
+      where: { event_id: eventIds, user_id: req.user.id },
+    });
+    const memberEventIds = new Set(memberships.map((m) => m.event_id));
+    const accessible = photos.filter((p) => memberEventIds.has(p.event_id) && !p.is_hidden);
+
+    if (accessible.length === 0) {
+      return res.status(400).json({ error: 'No accessible photos found' });
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="snapvault-photos.zip"');
+
+    const archive = archiver('zip', { zlib: { level: 1 } }); // level 1 = fast, photos already compressed
+    archive.on('error', (err) => {
+      console.error('Archive error:', err);
+      if (!res.headersSent) res.status(500).end();
+    });
+    archive.pipe(res);
+
+    for (const photo of accessible) {
+      try {
+        const buffer = await downloadBuffer(photo.s3_key);
+        const ext = path.extname(photo.original_filename) || '.jpg';
+        archive.append(buffer, { name: `${photo.id}${ext}` });
+      } catch (dlErr) {
+        console.error(`Failed to fetch photo ${photo.id} for ZIP:`, dlErr.message);
+      }
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    console.error('ZIP download error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to create ZIP' });
   }
 });
 

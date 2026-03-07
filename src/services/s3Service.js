@@ -64,14 +64,16 @@ async function generateThumbnail(originalKey, thumbnailKey) {
   await uploadBuffer(thumbnailKey, thumbnail, 'image/jpeg');
 }
 
-// Generate a watermarked copy of a thumbnail and upload it to wmKey
-async function generateWatermarkedThumbnail(thumbnailKey, wmKey) {
+// Generate a watermarked copy of a thumbnail and upload it to wmKey.
+// watermarkText: defaults to 'SnapVault'; pass organizer name for premium plans.
+async function generateWatermarkedThumbnail(thumbnailKey, wmKey, watermarkText = 'SnapVault') {
   const buffer = await downloadBuffer(thumbnailKey);
   const { width = 400, height = 400 } = await sharp(buffer).metadata();
 
   const fontSize = Math.max(18, Math.floor(Math.min(width, height) / 8));
   const cx = width / 2;
   const cy = height / 2;
+  const safeText = String(watermarkText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
     <text
@@ -85,7 +87,7 @@ async function generateWatermarkedThumbnail(thumbnailKey, wmKey) {
       font-family="Arial, Helvetica, sans-serif"
       font-weight="bold"
       transform="rotate(-30 ${cx} ${cy})"
-    >SnapVault</text>
+    >${safeText}</text>
   </svg>`;
 
   let watermarked;
