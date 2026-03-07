@@ -152,15 +152,24 @@ router.post('/confirm', authenticate, [
           User.findByPk(req.user.id, { attributes: ['name'] }),
           EventMember.findAll({ where: { event_id: photo.event_id }, attributes: ['user_id'] }),
         ]);
-        const uploaderName = uploaderUser?.name || 'Organizer';
-        for (const m of members) {
+        const uploaderName = uploaderUser?.name || 'Someone';
+        const eventTitle = event ? event.title : 'the event';
+        // Re-fetch members with face_scan_count to differentiate notification types
+        const membersWithScan = await EventMember.findAll({
+          where: { event_id: photo.event_id },
+          attributes: ['user_id', 'face_scan_count'],
+        });
+        for (const m of membersWithScan) {
           if (m.user_id === req.user.id) continue; // skip the uploader
+          const hasScanned = (m.face_scan_count || 0) > 0;
           await sendNotification({
             userId: m.user_id,
-            type: 'new_photo',
-            title: event ? event.title : 'New Photo',
-            body: `${uploaderName} added a new photo to the event.`,
-            data: { event_id: photo.event_id, screen: 'gallery' },
+            type: hasScanned ? 'rescan' : 'new_photo',
+            title: hasScanned ? 'New Photos Added' : eventTitle,
+            body: hasScanned
+              ? `New photos added to "${eventTitle}". Re-scan to find more of yours.`
+              : `${uploaderName} added a new photo to ${eventTitle}.`,
+            data: { event_id: photo.event_id, screen: hasScanned ? 'face_scan' : 'gallery' },
           });
         }
       } catch (e) { console.error('[Notif] new_photo error:', e.message); }

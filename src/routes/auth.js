@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const router = express.Router();
 
 const User = require('../models/User');
+const { FaceRejection, EventMember } = require('../models');
 const { storeOtp, verifyOtp } = require('../services/otpService');
 const { sendOtpEmail } = require('../services/emailService');
 const { signToken } = require('../services/jwtService');
@@ -213,6 +214,24 @@ router.post('/profile/photo-url', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Profile photo URL error:', err);
     res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
+// DELETE /auth/face-data
+// Clear face search results: removes all FaceRejection records and resets face_scan_count to 0
+router.delete('/face-data', authenticate, async (req, res) => {
+  try {
+    await Promise.all([
+      FaceRejection.destroy({ where: { user_id: req.user.id } }),
+      EventMember.update(
+        { face_scan_count: 0 },
+        { where: { user_id: req.user.id } }
+      ),
+    ]);
+    res.json({ message: 'Face data cleared successfully' });
+  } catch (err) {
+    console.error('Clear face data error:', err);
+    res.status(500).json({ error: 'Failed to clear face data' });
   }
 });
 
