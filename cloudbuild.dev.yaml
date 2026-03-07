@@ -3,13 +3,13 @@ steps:
     args:
       - build
       - -t
-      - asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-dev/backend:$SHORT_SHA
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-backend-dev/backend:$SHORT_SHA
       - .
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - push
-      - asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-dev/backend:$SHORT_SHA
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-backend-dev/backend:$SHORT_SHA
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
@@ -17,7 +17,7 @@ steps:
       - run
       - deploy
       - snapvault-backend-dev
-      - --image=asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-dev/backend:$SHORT_SHA
+      - --image=asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-backend-dev/backend:$SHORT_SHA
       - --region=asia-south1
       - --platform=managed
       - --allow-unauthenticated
