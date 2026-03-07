@@ -508,7 +508,6 @@ router.post('/download-zip', authenticate, [
     const photoIds = req.body.photo_ids.map(Number).filter(Boolean);
     const photos = await Photo.findAll({
       where: { id: photoIds, status: 'uploaded' },
-      include: [{ model: EventMember, as: null, required: false }],
     });
 
     // Verify membership for all events referenced
