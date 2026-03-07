@@ -16,9 +16,9 @@ const { up: runMigration11 } = require('./src/migrations/011_member_access');
 const { up: runMigration12 } = require('./src/migrations/012_watermark_thumbnail');
 const { up: runMigration13 } = require('./src/migrations/013_face_scan_count');
 const { up: runMigration14 } = require('./src/migrations/014_drop_watermark_key');
+const { up: runMigration15 } = require('./src/migrations/015_user_photo_matches');
 const { ensureCollection } = require('./src/services/rekognitionService');
 const { startExpiryJob } = require('./src/jobs/eventExpiryJob');
-const { Op } = require('sequelize');
 
 async function start() {
   try {
@@ -44,6 +44,7 @@ async function start() {
     await runMigration12();
     await runMigration13();
     await runMigration14();
+    await runMigration15();
 
     // Ensure Rekognition collection exists
     await ensureCollection();
@@ -52,40 +53,10 @@ async function start() {
     app.listen(env.port, () => {
       console.log(`SnapVault backend running on port ${env.port}`);
       startExpiryJob();
-      backfillWatermarks();
     });
   } catch (err) {
     console.error('Startup failed:', err);
     process.exit(1);
-  }
-}
-
-// One-time background job: generate watermarked thumbnails for photos missing them
-async function backfillWatermarks() {
-  try {
-    const { Photo } = require('./src/models');
-    const { generateWatermarkedThumbnail } = require('./src/services/s3Service');
-    const photos = await Photo.findAll({
-      where: {
-        thumbnail_key: { [Op.ne]: null },
-        thumbnail_wm_key: null,
-        status: 'uploaded',
-      },
-    });
-    if (photos.length === 0) return;
-    console.log(`[WatermarkBackfill] Processing ${photos.length} photo(s)...`);
-    for (const photo of photos) {
-      try {
-        const wmKey = photo.thumbnail_key.replace('/thumbnails/', '/thumbnails-wm/');
-        await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey);
-        await photo.update({ thumbnail_wm_key: wmKey });
-      } catch (err) {
-        console.error(`[WatermarkBackfill] Failed for photo ${photo.id}:`, err.message);
-      }
-    }
-    console.log('[WatermarkBackfill] Done');
-  } catch (err) {
-    console.error('[WatermarkBackfill] Error:', err.message);
   }
 }
 

@@ -8,6 +8,7 @@ const EventMember = sequelize.define('EventMember', {
   role: { type: DataTypes.ENUM('organizer', 'guest'), defaultValue: 'guest' },
   access_type: { type: DataTypes.ENUM('full', 'partial'), defaultValue: 'partial' },
   face_scan_count: { type: DataTypes.INTEGER, defaultValue: 0 },
+  matched_face_ids: { type: DataTypes.JSON, allowNull: true },
   joined_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 }, {
   tableName: 'event_members',

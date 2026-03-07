@@ -218,15 +218,13 @@ router.post('/profile/photo-url', authenticate, async (req, res) => {
 });
 
 // DELETE /auth/face-data
-// Clear face search results: removes all FaceRejection records and resets face_scan_count to 0
+// Clears stored face identity (matched_face_ids + FaceRejections).
+// Does NOT reset face_scan_count or user_photo_matches (My Photos history is preserved).
 router.delete('/face-data', authenticate, async (req, res) => {
   try {
     await Promise.all([
       FaceRejection.destroy({ where: { user_id: req.user.id } }),
-      EventMember.update(
-        { face_scan_count: 0 },
-        { where: { user_id: req.user.id } }
-      ),
+      EventMember.update({ matched_face_ids: null }, { where: { user_id: req.user.id } }),
     ]);
     res.json({ message: 'Face data cleared successfully' });
   } catch (err) {

@@ -6,6 +6,7 @@ const PhotoFace = require('./PhotoFace');
 const FaceRejection = require('./FaceRejection');
 const Plan = require('./Plan');
 const Subscription = require('./Subscription');
+const UserPhotoMatch = require('./UserPhotoMatch');
 
 // Event <-> User (organizer)
 Event.belongsTo(User, { foreignKey: 'organizer_id', as: 'organizer' });
@@ -33,10 +34,14 @@ PhotoFace.belongsTo(Photo, { foreignKey: 'photo_id' });
 FaceRejection.belongsTo(User, { foreignKey: 'user_id' });
 FaceRejection.belongsTo(Photo, { foreignKey: 'photo_id' });
 
+// UserPhotoMatch <-> User + Photo
+UserPhotoMatch.belongsTo(User, { foreignKey: 'user_id' });
+UserPhotoMatch.belongsTo(Photo, { foreignKey: 'photo_id' });
+
 // Subscription <-> User + Plan
 User.hasMany(Subscription, { foreignKey: 'user_id' });
 Subscription.belongsTo(User, { foreignKey: 'user_id' });
 Subscription.belongsTo(Plan, { foreignKey: 'plan_key', targetKey: 'plan_key' });
 Plan.hasMany(Subscription, { foreignKey: 'plan_key', sourceKey: 'plan_key' });
 
-module.exports = { User, Event, EventMember, Photo, PhotoFace, FaceRejection, Plan, Subscription };
+module.exports = { User, Event, EventMember, Photo, PhotoFace, FaceRejection, Plan, Subscription, UserPhotoMatch };

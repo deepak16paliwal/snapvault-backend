@@ -5,7 +5,8 @@ const path = require('path');
 const multer = require('multer');
 const router = express.Router();
 
-const { Photo, PhotoFace, FaceRejection, Event, EventMember, User } = require('../models');
+const { Photo, PhotoFace, FaceRejection, Event, EventMember, User, UserPhotoMatch } = require('../models');
+const { Op } = require('sequelize');
 const { authenticate } = require('../middleware/authMiddleware');
 const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile, downloadBuffer } = require('../services/s3Service');
 const archiver = require('archiver');
@@ -213,6 +214,29 @@ router.post('/confirm', authenticate, [
               });
             }
           } catch (ne) { console.error('[Notif] face_indexed error:', ne.message); }
+
+          // Auto-match: find members with stored face profiles and notify if overlap
+          try {
+            const newFaceIds = faces.map((f) => f.faceId);
+            const membersWithProfiles = await EventMember.findAll({
+              where: { event_id: photo.event_id, matched_face_ids: { [Op.ne]: null } },
+            });
+            for (const m of membersWithProfiles) {
+              const overlap = (m.matched_face_ids || []).some((id) => newFaceIds.includes(id));
+              if (!overlap) continue;
+              await UserPhotoMatch.findOrCreate({
+                where: { user_id: m.user_id, event_id: photo.event_id, photo_id: photo.id },
+              });
+              const evt = await Event.findByPk(photo.event_id);
+              sendNotification({
+                userId: m.user_id,
+                type: 'new_photo_match',
+                title: 'You\'re in a new photo!',
+                body: `A new photo of you was added to "${evt?.title || 'the event'}". Tap to view.`,
+                data: { event_id: String(photo.event_id), screen: 'my_photos' },
+              }).catch(() => {});
+            }
+          } catch (amErr) { console.error('[AutoMatch] error:', amErr.message); }
         } else {
           await photo.update({ face_index_status: 'no_faces' });
           console.log(`[Rekognition] Photo ${photo.id}: no faces detected`);
@@ -322,6 +346,18 @@ router.post('/face-search', authenticate, upload.single('image'), [
     const rejectedIds = new Set(rejections.map((r) => r.photo_id));
     const filteredPhotos = uniquePhotos.filter((p) => !rejectedIds.has(p.id));
 
+    // Persist matched face IDs (union with any previous scan) and store photo matches
+    const existingIds = membership.matched_face_ids || [];
+    const allFaceIds = [...new Set([...existingIds, ...matchedFaceIds])];
+    await membership.update({ matched_face_ids: allFaceIds });
+    if (filteredPhotos.length > 0) {
+      await Promise.all(
+        filteredPhotos.map((p) =>
+          UserPhotoMatch.findOrCreate({ where: { user_id: req.user.id, event_id: eventId, photo_id: p.id } })
+        )
+      );
+    }
+
     // Generate presigned URLs
     const photosWithUrls = await Promise.all(filteredPhotos.map(buildPhotoResponse));
 
@@ -329,6 +365,33 @@ router.post('/face-search', authenticate, upload.single('image'), [
   } catch (err) {
     console.error('Face search error:', err);
     res.status(500).json({ error: 'Face search failed' });
+  }
+});
+
+// GET /photos/my-matches/:event_id
+// Return photos persistently matched to the current user in an event
+router.get('/my-matches/:event_id', authenticate, async (req, res) => {
+  const eventId = parseInt(req.params.event_id);
+  try {
+    const matches = await UserPhotoMatch.findAll({
+      where: { user_id: req.user.id, event_id: eventId },
+      include: [{
+        model: Photo,
+        where: { status: 'uploaded' },
+        include: [{ model: User, as: 'uploader', attributes: ['id', 'name'] }],
+      }],
+    });
+    const rejections = await FaceRejection.findAll({
+      where: { user_id: req.user.id },
+      attributes: ['photo_id'],
+    });
+    const rejectedIds = new Set(rejections.map((r) => r.photo_id));
+    const photos = matches.map((m) => m.Photo).filter((p) => p && !rejectedIds.has(p.id));
+    const photosWithUrls = await Promise.all(photos.map(buildPhotoResponse));
+    res.json({ photos: photosWithUrls });
+  } catch (err) {
+    console.error('My matches error:', err);
+    res.status(500).json({ error: 'Failed to fetch matched photos' });
   }
 });
 
