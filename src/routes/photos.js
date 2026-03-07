@@ -5,9 +5,9 @@ const path = require('path');
 const multer = require('multer');
 const router = express.Router();
 
-const { Photo, PhotoFace, FaceRejection, Event, EventMember, User, Subscription, Plan } = require('../models');
+const { Photo, PhotoFace, FaceRejection, Event, EventMember, User } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
-const { getUploadUrl, getDownloadUrl, generateThumbnail, generateWatermarkedThumbnail, deleteFile, downloadBuffer } = require('../services/s3Service');
+const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile, downloadBuffer } = require('../services/s3Service');
 const archiver = require('archiver');
 const rekognitionService = require('../services/rekognitionService');
 const { sendNotification } = require('../services/notificationService');
@@ -40,10 +40,9 @@ async function isMember(eventId, userId) {
 
 // Helper: build photo response with presigned URLs (reused in multiple endpoints)
 async function buildPhotoResponse(p) {
-  const [photoUrl, thumbnailUrl, thumbnailWmUrl] = await Promise.all([
+  const [photoUrl, thumbnailUrl] = await Promise.all([
     getDownloadUrl(p.s3_key),
     p.thumbnail_key ? getDownloadUrl(p.thumbnail_key) : null,
-    p.thumbnail_wm_key ? getDownloadUrl(p.thumbnail_wm_key) : null,
   ]);
   return {
     id: p.id,
@@ -53,7 +52,6 @@ async function buildPhotoResponse(p) {
     mime_type: p.mime_type,
     photo_url: photoUrl,
     thumbnail_url: thumbnailUrl,
-    thumbnail_wm_url: thumbnailWmUrl,
     uploader: p.uploader,
     created_at: p.created_at,
     is_hidden: p.is_hidden ?? false,
@@ -178,30 +176,6 @@ router.post('/confirm', authenticate, [
           await generateThumbnail(photo.s3_key, photo.thumbnail_key);
         } catch (thumbErr) {
           console.error('Thumbnail generation failed:', thumbErr.message);
-        }
-
-        // Generate watermarked thumbnail with plan-based watermark text
-        try {
-          const wmKey = photo.thumbnail_key.replace('/thumbnails/', '/thumbnails-wm/');
-          let watermarkText = 'SnapVault';
-          try {
-            const wmEvent = await Event.findByPk(photo.event_id, { attributes: ['organizer_id'] });
-            if (wmEvent) {
-              const sub = await Subscription.findOne({
-                where: { user_id: wmEvent.organizer_id, status: 'active' },
-                include: [{ model: Plan, attributes: ['plan_key'] }],
-              });
-              const planKey = sub?.Plan?.plan_key || 'free';
-              if (['essential', 'premium'].includes(planKey)) {
-                const organizer = await User.findByPk(wmEvent.organizer_id, { attributes: ['name'] });
-                watermarkText = organizer?.name || 'SnapVault';
-              }
-            }
-          } catch (_) { /* fall back to default */ }
-          await generateWatermarkedThumbnail(photo.thumbnail_key, wmKey, watermarkText);
-          await photo.update({ thumbnail_wm_key: wmKey });
-        } catch (wmErr) {
-          console.error('Watermark generation failed:', wmErr.message);
         }
       }
 

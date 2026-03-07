@@ -64,45 +64,6 @@ async function generateThumbnail(originalKey, thumbnailKey) {
   await uploadBuffer(thumbnailKey, thumbnail, 'image/jpeg');
 }
 
-// Generate a watermarked copy of a thumbnail and upload it to wmKey.
-// watermarkText: defaults to 'SnapVault'; pass organizer name for premium plans.
-async function generateWatermarkedThumbnail(thumbnailKey, wmKey, watermarkText = 'SnapVault') {
-  const buffer = await downloadBuffer(thumbnailKey);
-  const { width = 400, height = 400 } = await sharp(buffer).metadata();
-
-  const fontSize = Math.max(18, Math.floor(Math.min(width, height) / 8));
-  const cx = width / 2;
-  const cy = height / 2;
-  const safeText = String(watermarkText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-    <text
-      x="${cx}" y="${cy}"
-      text-anchor="middle"
-      dominant-baseline="middle"
-      fill="rgba(255,255,255,0.50)"
-      stroke="rgba(0,0,0,0.18)"
-      stroke-width="1"
-      font-size="${fontSize}"
-      font-family="Arial, Helvetica, sans-serif"
-      font-weight="bold"
-      transform="rotate(-30 ${cx} ${cy})"
-    >${safeText}</text>
-  </svg>`;
-
-  let watermarked;
-  try {
-    watermarked = await sharp(buffer)
-      .composite([{ input: Buffer.from(svg), gravity: 'center' }])
-      .jpeg({ quality: 80 })
-      .toBuffer();
-  } catch (err) {
-    throw new Error(`Sharp SVG composite failed for ${wmKey}: ${err.message}`);
-  }
-
-  await uploadBuffer(wmKey, watermarked, 'image/jpeg');
-}
-
 // Convert a stored S3 https URL to a presigned GET URL.
 // Returns null for null/empty input, returns the original URL if it can't be parsed.
 async function presignStoredUrl(url) {
@@ -120,7 +81,7 @@ module.exports = {
   getUploadUrl,
   getDownloadUrl,
   generateThumbnail,
-  generateWatermarkedThumbnail,
   deleteFile,
+  downloadBuffer,
   presignStoredUrl,
 };

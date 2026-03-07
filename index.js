@@ -15,6 +15,7 @@ const { up: runMigration10 } = require('./src/migrations/010_event_expiry');
 const { up: runMigration11 } = require('./src/migrations/011_member_access');
 const { up: runMigration12 } = require('./src/migrations/012_watermark_thumbnail');
 const { up: runMigration13 } = require('./src/migrations/013_face_scan_count');
+const { up: runMigration14 } = require('./src/migrations/014_drop_watermark_key');
 const { ensureCollection } = require('./src/services/rekognitionService');
 const { startExpiryJob } = require('./src/jobs/eventExpiryJob');
 const { Op } = require('sequelize');
@@ -42,6 +43,7 @@ async function start() {
     await runMigration11();
     await runMigration12();
     await runMigration13();
+    await runMigration14();
 
     // Ensure Rekognition collection exists
     await ensureCollection();
