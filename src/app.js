@@ -64,7 +64,7 @@ app.use('/billing', require('./routes/billing'));
 app.use('/webhooks', require('./routes/webhooks'));
 
 // Health check
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/health', (req, res) => res.json({ status: 'Health ok' }));
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
