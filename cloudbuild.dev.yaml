@@ -1,0 +1,33 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -t
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-dev/backend:$SHORT_SHA
+      - .
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-dev/backend:$SHORT_SHA
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - snapvault-backend-dev
+      - --image=asia-south1-docker.pkg.dev/$PROJECT_ID/snapvault-dev/backend:$SHORT_SHA
+      - --region=asia-south1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --memory=512Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=5
+      - --set-secrets=DB_HOST=DB_HOST_DEV:latest,DB_USER=DB_USER_DEV:latest,DB_PASSWORD=DB_PASSWORD_DEV:latest,DB_NAME=DB_NAME_DEV:latest,REDIS_URL=REDIS_URL_DEV:latest,JWT_SECRET=JWT_SECRET_DEV:latest,AWS_ACCESS_KEY_ID=AWS_ACCESS_KEY_ID_DEV:latest,AWS_SECRET_ACCESS_KEY=AWS_SECRET_ACCESS_KEY_DEV:latest,AWS_REGION=AWS_REGION_DEV:latest,S3_BUCKET=S3_BUCKET_DEV:latest,REKOGNITION_COLLECTION=REKOGNITION_COLLECTION_DEV:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID_DEV:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET_DEV:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET_DEV:latest,EMAIL_HOST=EMAIL_HOST_DEV:latest,EMAIL_PORT=EMAIL_PORT_DEV:latest,EMAIL_USER=EMAIL_USER_DEV:latest,EMAIL_PASS=EMAIL_PASS_DEV:latest,FIREBASE_SA_JSON=FIREBASE_SA_JSON_DEV:latest
+      - --set-env-vars=NODE_ENV=development,PORT=8080
+
+options:
+  logging: CLOUD_LOGGING_ONLY
