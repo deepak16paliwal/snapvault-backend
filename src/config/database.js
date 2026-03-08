@@ -1,11 +1,14 @@
 const { Sequelize } = require('sequelize');
 const env = require('./env');
 
+const socketPath = process.env.DB_SOCKET_PATH;
+
 const sequelize = new Sequelize(env.db.name, env.db.user, env.db.pass, {
-  host: env.db.host,
-  port: env.db.port,
   dialect: 'mysql',
   logging: env.nodeEnv === 'development' ? console.log : false,
+  ...(socketPath
+    ? { dialectOptions: { socketPath } }
+    : { host: env.db.host, port: env.db.port }),
   pool: {
     max: 10,
     min: 0,
