@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -29,6 +30,25 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
     },
   }]);
 });
+
+// CORS — allow web dashboard and mobile apps
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:3000'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, curl)
+    if (!origin) return callback(null, true);
+    const allowed =
+      ALLOWED_ORIGINS.some(o => origin.startsWith(o)) ||
+      origin.endsWith('.vercel.app');
+    callback(allowed ? null : new Error('CORS not allowed'), allowed);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Security middleware
 app.use(helmet());
