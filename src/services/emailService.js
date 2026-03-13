@@ -12,6 +12,9 @@ const transporter = nodemailer.createTransport({
 });
 
 async function sendOtpEmail(toEmail, otp) {
+  // Demo account — skip SMTP entirely
+  if (process.env.DEMO_EMAIL && toEmail === process.env.DEMO_EMAIL) return;
+
   await transporter.sendMail({
     from: env.email.from,
     to: toEmail,

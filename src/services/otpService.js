@@ -14,6 +14,11 @@ function hashOtp(otp) {
 }
 
 async function storeOtp(email) {
+  // Demo account bypass — no Redis, no random OTP
+  if (process.env.DEMO_EMAIL && email === process.env.DEMO_EMAIL) {
+    return process.env.DEMO_OTP || '123456';
+  }
+
   const otp = generateOtp();
   const hashed = hashOtp(otp);
   const key = `otp:${email}`;
@@ -26,6 +31,14 @@ async function storeOtp(email) {
 }
 
 async function verifyOtp(email, inputOtp) {
+  // Demo account bypass — always accept the static OTP, no Redis needed
+  if (process.env.DEMO_EMAIL && email === process.env.DEMO_EMAIL) {
+    const demoOtp = process.env.DEMO_OTP || '123456';
+    return inputOtp === demoOtp
+      ? { success: true }
+      : { success: false, error: 'invalid_otp' };
+  }
+
   const key = `otp:${email}`;
   const attemptsKey = `otp_attempts:${email}`;
 
