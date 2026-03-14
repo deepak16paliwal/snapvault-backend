@@ -6,6 +6,19 @@ const {
   DeleteFacesCommand,
 } = require('@aws-sdk/client-rekognition');
 const { rekognitionClient } = require('../config/rekognition');
+const sharp = require('sharp');
+
+/**
+ * Prepare an image buffer for Rekognition:
+ * - Converts any format (HEIC, PNG, WebP) → JPEG (Rekognition Bytes only accepts JPEG/PNG)
+ * - Resizes to max 1024px (Rekognition Bytes hard limit: 5 MB; resized JPEG ≈ 200–400 KB)
+ */
+async function prepareForRekognition(imageBuffer) {
+  return sharp(imageBuffer)
+    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+}
 
 /**
  * Create a Rekognition collection for an event.
@@ -59,9 +72,19 @@ async function deleteEventCollection(eventId) {
  * @returns {Array<{ faceId, confidence, boundingBox }>}
  */
 async function indexFaces(collectionId, imageBuffer, externalImageId) {
+  // Ensure collection exists — events created before this code was deployed won't have one
+  try {
+    await rekognitionClient.send(new CreateCollectionCommand({ CollectionId: collectionId }));
+  } catch (err) {
+    if (err.name !== 'ResourceAlreadyExistsException') throw err;
+  }
+
+  // Resize to max 1024px + convert to JPEG: fixes 5MB Bytes limit and HEIC/WebP format issues
+  const rekogBuffer = await prepareForRekognition(imageBuffer);
+
   const command = new IndexFacesCommand({
     CollectionId: collectionId,
-    Image: { Bytes: imageBuffer },
+    Image: { Bytes: rekogBuffer },
     ExternalImageId: externalImageId,
     DetectionAttributes: [],
     QualityFilter: 'NONE',
@@ -82,9 +105,12 @@ async function indexFaces(collectionId, imageBuffer, externalImageId) {
  * @returns {Array<{ faceId, similarity }>} sorted by similarity desc
  */
 async function searchFacesByImage(collectionId, imageBuffer) {
+  // Resize + convert to JPEG: same constraints apply for search image
+  const rekogBuffer = await prepareForRekognition(imageBuffer);
+
   const command = new SearchFacesByImageCommand({
     CollectionId: collectionId,
-    Image: { Bytes: imageBuffer },
+    Image: { Bytes: rekogBuffer },
     FaceMatchThreshold: 50,
     MaxFaces: 100,
   });
