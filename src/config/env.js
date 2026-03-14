@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const required = ['JWT_SECRET', 'SMTP_USER', 'SMTP_PASS', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+const required = ['JWT_SECRET', 'MJ_APIKEY_PUBLIC', 'MJ_APIKEY_SECRET', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
 
 for (const key of required) {
   if (!process.env[key]) {
@@ -31,11 +31,10 @@ module.exports = {
   },
 
   email: {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    from: process.env.EMAIL_FROM || `SnapVault <${process.env.SMTP_USER}>`,
+    apiKey: process.env.MJ_APIKEY_PUBLIC,
+    secretKey: process.env.MJ_APIKEY_SECRET,
+    fromName: process.env.EMAIL_FROM_NAME || 'SnapLivo',
+    fromAddress: process.env.EMAIL_FROM_ADDRESS || 'support@snaplivo.in',
   },
 
   aws: {
