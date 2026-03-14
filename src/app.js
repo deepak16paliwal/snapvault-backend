@@ -82,6 +82,7 @@ app.use('/photos', require('./routes/photos'));
 app.use('/notifications', require('./routes/notifications'));
 app.use('/billing', require('./routes/billing'));
 app.use('/webhooks', require('./routes/webhooks'));
+app.use('/users', require('./routes/users'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'Health ok' }));
