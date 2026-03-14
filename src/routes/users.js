@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { User, Event, EventMember, Photo } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
-const { getDownloadUrl } = require('../services/s3Service');
+const { getDownloadUrl, presignStoredUrl } = require('../services/s3Service');
 
 // GET /users/:id/profile
 // Returns organizer profile info + events shared between the organizer and the requesting user.
@@ -18,7 +18,7 @@ router.get('/:id/profile', authenticate, async (req, res) => {
 
     let profilePhotoUrl = null;
     if (organizer.profile_photo_url) {
-      try { profilePhotoUrl = await getDownloadUrl(organizer.profile_photo_url, 3600); } catch (_) {}
+      try { profilePhotoUrl = await presignStoredUrl(organizer.profile_photo_url, 3600); } catch (_) {}
     }
 
     // Events in common: organizer owns the event AND the requesting user is a member
