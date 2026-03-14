@@ -12,7 +12,7 @@ app.get('/.well-known/apple-app-site-association', (req, res) => {
   res.json({
     applinks: {
       details: [{
-        appIDs: ['ZA2JH67T7M.com.snapvault.snapvault'],
+        appIDs: ['ZA2JH67T7M.com.snaplivo.snaplivo'],
         components: [{ '/': '/events/join/*' }],
       }],
     },
@@ -25,7 +25,7 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
     relation: ['delegate_permission/common.handle_all_urls'],
     target: {
       namespace: 'android_app',
-      package_name: 'com.snapvault.snapvault',
+      package_name: 'com.snaplivo.snaplivo',
       sha256_cert_fingerprints: ['B4:65:F9:7D:2E:0D:28:FE:67:9F:C7:6F:6A:DF:83:38:CA:C6:A5:60:D2:03:BE:FF:7A:E9:C1:29:88:42:D2:CE'],
     },
   }]);
