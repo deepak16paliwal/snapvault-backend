@@ -169,7 +169,7 @@ router.get('/me', authenticate, async (req, res) => {
 router.patch('/profile', authenticate, [
   body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
   body('date_of_birth').optional().isDate().withMessage('Invalid date format (YYYY-MM-DD)'),
-  body('profile_photo_url').optional().isURL().withMessage('Invalid URL'),
+  body('profile_photo_url').optional().isString().withMessage('Invalid photo key'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
 
@@ -209,8 +209,7 @@ router.post('/profile/photo-url', authenticate, async (req, res) => {
     const ext = (filename || 'photo').split('.').pop() || 'jpg';
     const key = `profiles/${req.user.id}/${Date.now()}.${ext}`;
     const uploadUrl = await getUploadUrl(key, mime_type || 'image/jpeg');
-    const photoUrl = `https://${env.aws.s3Bucket}.s3.${env.aws.region}.amazonaws.com/${key}`;
-    res.json({ upload_url: uploadUrl, photo_url: photoUrl });
+    res.json({ upload_url: uploadUrl, photo_url: key });
   } catch (err) {
     console.error('Profile photo URL error:', err);
     res.status(500).json({ error: 'Failed to generate upload URL' });

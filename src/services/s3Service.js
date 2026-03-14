@@ -89,7 +89,17 @@ async function computeImageHash(buffer) {
   return bits.toString(16).padStart(16, '0');
 }
 
-const presignStoredUrl = (key, expiresIn = 3600) => getDownloadUrl(key, expiresIn);
+// Handles both plain storage keys and legacy full S3 URLs stored in DB
+const presignStoredUrl = (value, expiresIn = 3600) => {
+  if (!value) return Promise.resolve(null);
+  if (value.startsWith('http')) {
+    try {
+      const key = new URL(value).pathname.replace(/^\//, '');
+      return getDownloadUrl(key, expiresIn);
+    } catch (_) {}
+  }
+  return getDownloadUrl(value, expiresIn);
+};
 
 module.exports = {
   getUploadUrl,
