@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const required = ['JWT_SECRET', 'SMTP_USER', 'SMTP_PASS'];
+const required = ['JWT_SECRET', 'SMTP_USER', 'SMTP_PASS', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
 
 for (const key of required) {
   if (!process.env[key]) {

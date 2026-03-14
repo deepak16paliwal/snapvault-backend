@@ -248,7 +248,7 @@ router.post('/:id/cover-photo-url', authenticate, requireRole('organizer'), asyn
     res.json({ upload_url: uploadUrl, storage_key: storageKey });
   } catch (err) {
     console.error('Cover photo URL error:', err);
-    res.status(500).json({ error: 'Failed to generate upload URL' });
+    res.status(500).json({ error: 'Failed to generate upload URL', detail: err.message });
   }
 });
 
