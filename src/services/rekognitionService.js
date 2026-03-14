@@ -65,7 +65,7 @@ async function indexFaces(collectionId, s3Bucket, s3Key, externalImageId) {
     },
     ExternalImageId: externalImageId,
     DetectionAttributes: [],
-    QualityFilter: 'AUTO',
+    QualityFilter: 'NONE',
   });
 
   const response = await rekognitionClient.send(command);
@@ -86,7 +86,7 @@ async function searchFacesByImage(collectionId, imageBuffer) {
   const command = new SearchFacesByImageCommand({
     CollectionId: collectionId,
     Image: { Bytes: imageBuffer },
-    FaceMatchThreshold: 80,
+    FaceMatchThreshold: 50,
     MaxFaces: 100,
   });
 
