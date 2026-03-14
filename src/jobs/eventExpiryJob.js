@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const { Event, Photo } = require('../models');
 const { sendNotification } = require('../services/notificationService');
 const { deleteFile } = require('../services/s3Service');
+const { deleteEventCollection } = require('../services/rekognitionService');
 
 async function runExpiryJob() {
   const now = new Date();
@@ -64,6 +65,8 @@ async function runExpiryJob() {
     }
     await Photo.destroy({ where: { event_id: event.id } });
     await event.destroy();
+    // Delete per-event Rekognition collection (non-blocking)
+    deleteEventCollection(event.id).catch(() => {});
     console.log(`[ExpiryJob] Event ${event.id} permanently deleted (60-day grace elapsed)`);
   }
 }

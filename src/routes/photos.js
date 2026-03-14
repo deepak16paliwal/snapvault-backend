@@ -1,6 +1,5 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { randomUUID } = require('crypto');
 const path = require('path');
 const multer = require('multer');
 const router = express.Router();
@@ -8,7 +7,7 @@ const router = express.Router();
 const { Photo, PhotoFace, FaceRejection, Event, EventMember, User, UserPhotoMatch } = require('../models');
 const { Op } = require('sequelize');
 const { authenticate } = require('../middleware/authMiddleware');
-const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile, downloadBuffer } = require('../services/s3Service');
+const { getUploadUrl, getDownloadUrl, generateThumbnail, deleteFile, downloadBuffer, computeImageHash } = require('../services/s3Service');
 const archiver = require('archiver');
 const rekognitionService = require('../services/rekognitionService');
 const { sendNotification } = require('../services/notificationService');
@@ -91,24 +90,22 @@ router.post('/signed-url', authenticate, [
     const quota = await checkQuota(req.user, mime_type);
     if (!quota.allowed) return res.status(402).json({ error: quota.reason });
 
-    // Build S3 key
-    const ext = path.extname(filename).toLowerCase() || (isVideo ? '.mp4' : '.jpg');
-    const uuid = randomUUID();
-    const s3Key = `events/${event_id}/photos/${uuid}${ext}`;
-    // Videos don't get image thumbnails
-    const thumbnailKey = isVideo ? null : `events/${event_id}/thumbnails/${uuid}.jpg`;
-
-    // Create pending photo record — thumbnail_wm_key is set only after successful generation
+    // Create pending photo record first to get photo_id for deterministic key
     const photo = await Photo.create({
       event_id,
       uploader_id: req.user.id,
       original_filename: filename,
-      s3_key: s3Key,
-      thumbnail_key: thumbnailKey,
+      s3_key: 'pending',  // placeholder — updated immediately below
       file_size,
       mime_type,
       status: 'pending',
     });
+
+    // Build deterministic R2 keys using photo_id
+    const ext = path.extname(filename).toLowerCase() || (isVideo ? '.mp4' : '.jpg');
+    const s3Key = `events/${event_id}/photos/${photo.id}${ext}`;
+    const thumbnailKey = isVideo ? null : `events/${event_id}/thumbnails/${photo.id}.webp`;
+    await photo.update({ s3_key: s3Key, thumbnail_key: thumbnailKey });
 
     // Generate presigned upload URL
     const uploadUrl = await getUploadUrl(s3Key, mime_type);
@@ -170,7 +167,7 @@ router.post('/confirm', authenticate, [
       } catch (e) { console.error('[Notif] new_photo error:', e.message); }
     });
 
-    // Generate thumbnail async — don't block response (skip for videos)
+    // Generate thumbnail + hash + face index async — don't block response
     setImmediate(async () => {
       if (photo.thumbnail_key) {
         try {
@@ -182,9 +179,36 @@ router.post('/confirm', authenticate, [
 
       // Face indexing — images only
       if (photo.mime_type && photo.mime_type.startsWith('video/')) return;
+
+      // Compute perceptual hash and check for duplicates before calling Rekognition
+      try {
+        const buffer = await downloadBuffer(photo.s3_key);
+        const imageHash = await computeImageHash(buffer);
+        await photo.update({ image_hash: imageHash });
+
+        const duplicate = await Photo.findOne({
+          where: {
+            event_id: photo.event_id,
+            image_hash: imageHash,
+            id: { [Op.ne]: photo.id },
+            status: 'uploaded',
+          },
+        });
+        if (duplicate) {
+          await photo.update({ face_index_status: 'no_faces' });
+          console.log(`[Dedup] Photo ${photo.id} is a duplicate of ${duplicate.id} — skipping face index`);
+          return;
+        }
+      } catch (hashErr) {
+        console.error(`[Dedup] Hash error for photo ${photo.id}:`, hashErr.message);
+        // Continue with face indexing even if hashing fails
+      }
+
+      const collectionId = `event_${photo.event_id}`;
       try {
         const faces = await rekognitionService.indexFaces(
-          process.env.AWS_S3_BUCKET,
+          collectionId,
+          require('../config/env').r2.bucket,
           photo.s3_key,
           String(photo.id)
         );
@@ -192,7 +216,9 @@ router.post('/confirm', authenticate, [
           await PhotoFace.bulkCreate(
             faces.map((f) => ({
               photo_id: photo.id,
+              event_id: photo.event_id,
               rekognition_face_id: f.faceId,
+              bounding_box: f.boundingBox || null,
               confidence: f.confidence,
             }))
           );
@@ -306,8 +332,8 @@ router.post('/face-search', authenticate, upload.single('image'), [
     const usedCount = membership.face_scan_count + (membership.role !== 'organizer' ? 1 : 0);
     const scansRemaining = membership.role !== 'organizer' ? Math.max(0, SCAN_LIMIT - usedCount) : null;
 
-    // Search Rekognition collection with the selfie
-    const matches = await rekognitionService.searchFacesByImage(req.file.buffer);
+    // Search per-event Rekognition collection with the selfie
+    const matches = await rekognitionService.searchFacesByImage(`event_${eventId}`, req.file.buffer);
 
     if (matches.length === 0) {
       return res.status(400).json({
@@ -511,7 +537,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     // Delete Rekognition faces before removing from DB
     const faces = await PhotoFace.findAll({ where: { photo_id: photo.id } });
     if (faces.length > 0) {
-      await rekognitionService.deleteFaces(faces.map((f) => f.rekognition_face_id));
+      await rekognitionService.deleteFaces(`event_${photo.event_id}`, faces.map((f) => f.rekognition_face_id));
     }
 
     // Delete from S3

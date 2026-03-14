@@ -8,6 +8,4 @@ const rekognitionClient = new RekognitionClient({
   },
 });
 
-const COLLECTION_ID = 'snapvault-faces';
-
-module.exports = { rekognitionClient, COLLECTION_ID };
+module.exports = { rekognitionClient };

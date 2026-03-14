@@ -7,8 +7,8 @@ const { Event, EventMember, User, Photo } = require('../models');
 const sequelize = require('../config/database');
 const { authenticate, requireRole } = require('../middleware/authMiddleware');
 const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/emailService');
-const { presignStoredUrl, getUploadUrl } = require('../services/s3Service');
-const env = require('../config/env');
+const { getUploadUrl, getDownloadUrl } = require('../services/s3Service');
+const { createEventCollection } = require('../services/rekognitionService');
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -54,6 +54,11 @@ router.post('/', authenticate, requireRole('organizer'), [
       access_type: 'full',
     });
 
+    // Create per-event Rekognition collection (fire-and-forget — don't block response)
+    createEventCollection(event.id).catch((err) =>
+      console.error(`[Rekognition] Failed to create collection for event ${event.id}:`, err.message)
+    );
+
     res.status(201).json({ event });
   } catch (err) {
     console.error('Create event error:', err);
@@ -97,7 +102,9 @@ router.get('/', authenticate, async (req, res) => {
 
     const events = await Promise.all(memberships.map(async m => ({
       ...m.Event.toJSON(),
-      cover_photo_url: await presignStoredUrl(m.Event.cover_photo_url),
+      cover_photo_url: m.Event.cover_storage_key
+        ? await getDownloadUrl(m.Event.cover_storage_key)
+        : m.Event.cover_photo_url || null,
       my_role: m.role,
       my_access_type: m.access_type,
       my_face_scan_count: m.face_scan_count,
@@ -170,7 +177,9 @@ router.get('/:id', authenticate, async (req, res) => {
     res.json({
       event: {
         ...event.toJSON(),
-        cover_photo_url: await presignStoredUrl(event.cover_photo_url),
+        cover_photo_url: event.cover_storage_key
+          ? await getDownloadUrl(event.cover_storage_key)
+          : event.cover_photo_url || null,
         invite_link: membership.role === 'organizer'
           ? `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`
           : undefined,
@@ -191,7 +200,7 @@ router.patch('/:id', authenticate, requireRole('organizer'), [
   body('description').optional().trim(),
   body('event_date').optional().isDate().withMessage('Invalid date (YYYY-MM-DD)'),
   body('location').optional().trim(),
-  body('cover_photo_url').optional().isURL().withMessage('Invalid URL'),
+  body('cover_storage_key').optional().trim(),
   body('expires_at').optional().isISO8601().withMessage('Invalid expires_at (ISO 8601)'),
 ], async (req, res) => {
   if (!validate(req, res)) return;
@@ -205,13 +214,13 @@ router.patch('/:id', authenticate, requireRole('organizer'), [
       return res.status(404).json({ error: 'Event not found or not authorized' });
     }
 
-    const { title, description, event_date, location, cover_photo_url, expires_at } = req.body;
+    const { title, description, event_date, location, cover_storage_key, expires_at } = req.body;
     const updates = {};
     if (title !== undefined) updates.title = title;
     if (description !== undefined) updates.description = description;
     if (event_date !== undefined) updates.event_date = event_date;
     if (location !== undefined) updates.location = location;
-    if (cover_photo_url !== undefined) updates.cover_photo_url = cover_photo_url;
+    if (cover_storage_key !== undefined) updates.cover_storage_key = cover_storage_key;
     if (expires_at !== undefined) updates.expires_at = expires_at;
 
     await event.update(updates);
@@ -234,10 +243,9 @@ router.post('/:id/cover-photo-url', authenticate, requireRole('organizer'), asyn
 
     const { filename, mime_type } = req.body;
     const ext = (filename || 'cover').split('.').pop() || 'jpg';
-    const key = `events/${event.id}/cover/${Date.now()}.${ext}`;
-    const uploadUrl = await getUploadUrl(key, mime_type || 'image/jpeg');
-    const photoUrl = `https://${env.aws.s3Bucket}.s3.${env.aws.region}.amazonaws.com/${key}`;
-    res.json({ upload_url: uploadUrl, photo_url: photoUrl });
+    const storageKey = `events/${event.id}/cover/${Date.now()}.${ext}`;
+    const uploadUrl = await getUploadUrl(storageKey, mime_type || 'image/jpeg');
+    res.json({ upload_url: uploadUrl, storage_key: storageKey });
   } catch (err) {
     console.error('Cover photo URL error:', err);
     res.status(500).json({ error: 'Failed to generate upload URL' });
@@ -389,16 +397,15 @@ router.get('/:id/members', authenticate, requireRole('organizer'), async (req, r
       include: [{ model: User, attributes: ['id', 'name', 'email', 'profile_photo_url'] }],
     });
 
-    const membersWithUrls = await Promise.all(members.map(async (m) => {
+    const membersWithUrls = members.map((m) => {
       const user = m.User.toJSON();
       return {
         ...user,
-        profile_photo_url: await presignStoredUrl(user.profile_photo_url),
         member_role: m.role,
         access_type: m.access_type,
         joined_at: m.joined_at,
       };
-    }));
+    });
 
     res.json({ members: membersWithUrls });
   } catch (err) {

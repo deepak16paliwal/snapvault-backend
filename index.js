@@ -18,7 +18,9 @@ const { up: runMigration13 } = require('./src/migrations/013_face_scan_count');
 const { up: runMigration14 } = require('./src/migrations/014_drop_watermark_key');
 const { up: runMigration15 } = require('./src/migrations/015_user_photo_matches');
 const { up: runMigration16 } = require('./src/migrations/016_event_soft_delete');
-const { ensureCollection } = require('./src/services/rekognitionService');
+const { up: runMigration17 } = require('./src/migrations/017_cover_storage_key');
+const { up: runMigration18 } = require('./src/migrations/018_photo_hash');
+const { up: runMigration19 } = require('./src/migrations/019_photo_faces_event');
 const { startExpiryJob } = require('./src/jobs/eventExpiryJob');
 const { startSubscriptionJob } = require('./src/jobs/subscriptionJob');
 
@@ -48,9 +50,9 @@ async function start() {
     await runMigration14();
     await runMigration15();
     await runMigration16();
-
-    // Ensure Rekognition collection exists
-    await ensureCollection();
+    await runMigration17();
+    await runMigration18();
+    await runMigration19();
 
     // Start server
     app.listen(env.port, () => {

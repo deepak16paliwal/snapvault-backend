@@ -1,11 +1,13 @@
 const { S3Client } = require('@aws-sdk/client-s3');
 const env = require('./env');
 
+// Cloudflare R2 — S3-compatible, zero egress cost
 const s3 = new S3Client({
-  region: env.aws.region,
+  region: 'auto',
+  endpoint: `https://${env.r2.accountId}.r2.cloudflarestorage.com`,
   credentials: {
-    accessKeyId: env.aws.accessKeyId,
-    secretAccessKey: env.aws.secretAccessKey,
+    accessKeyId: env.r2.accessKeyId,
+    secretAccessKey: env.r2.secretAccessKey,
   },
   // Disable automatic checksum injection on presigned PUT URLs.
   // Without this, SDK v3 adds x-amz-checksum-crc32 to presigned URLs,

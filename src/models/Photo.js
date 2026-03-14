@@ -20,6 +20,7 @@ const Photo = sequelize.define('Photo', {
     defaultValue: 'pending',
   },
   face_indexed_at: { type: DataTypes.DATE },
+  image_hash: { type: DataTypes.STRING(64), allowNull: true },
   is_hidden: { type: DataTypes.BOOLEAN, defaultValue: false },
   is_pinned: { type: DataTypes.BOOLEAN, defaultValue: false },
   is_highlighted: { type: DataTypes.BOOLEAN, defaultValue: false },
