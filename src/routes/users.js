@@ -12,9 +12,14 @@ router.get('/:id/profile', authenticate, async (req, res) => {
     if (isNaN(organizerId)) return res.status(400).json({ error: 'Invalid user id' });
 
     const organizer = await User.findByPk(organizerId, {
-      attributes: ['id', 'name', 'email', 'phone', 'role'],
+      attributes: ['id', 'name', 'email', 'phone', 'role', 'profile_photo_url'],
     });
     if (!organizer) return res.status(404).json({ error: 'User not found' });
+
+    let profilePhotoUrl = null;
+    if (organizer.profile_photo_url) {
+      try { profilePhotoUrl = await getDownloadUrl(organizer.profile_photo_url, 3600); } catch (_) {}
+    }
 
     // Events in common: organizer owns the event AND the requesting user is a member
     const sharedEvents = await Event.findAll({
@@ -63,6 +68,7 @@ router.get('/:id/profile', authenticate, async (req, res) => {
       email: organizer.email,
       phone: organizer.phone,
       role: organizer.role,
+      profile_photo_url: profilePhotoUrl,
       events_in_common: eventsInCommon,
     });
   } catch (err) {

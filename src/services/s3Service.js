@@ -89,9 +89,12 @@ async function computeImageHash(buffer) {
   return bits.toString(16).padStart(16, '0');
 }
 
+const presignStoredUrl = (key, expiresIn = 3600) => getDownloadUrl(key, expiresIn);
+
 module.exports = {
   getUploadUrl,
   getDownloadUrl,
+  presignStoredUrl,
   generateThumbnail,
   deleteFile,
   downloadBuffer,
