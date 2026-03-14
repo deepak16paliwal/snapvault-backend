@@ -174,6 +174,8 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'You are not a member of this event' });
     }
 
+    const photoCount = await Photo.count({ where: { event_id: event.id, status: 'uploaded' } });
+
     res.json({
       event: {
         ...event.toJSON(),
@@ -183,6 +185,7 @@ router.get('/:id', authenticate, async (req, res) => {
         invite_link: membership.role === 'organizer'
           ? `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`
           : undefined,
+        photo_count: photoCount,
       },
       my_role: membership.role,
       my_access_type: membership.access_type,
