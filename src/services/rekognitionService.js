@@ -50,19 +50,18 @@ async function deleteEventCollection(eventId) {
 }
 
 /**
- * Index faces in a photo stored in R2.
+ * Index faces in a photo using its raw image buffer.
+ * Uses Image.Bytes instead of S3Object because Rekognition can only access AWS S3,
+ * not Cloudflare R2. The caller must download the buffer from R2 first.
  * @param {string} collectionId - e.g. 'event_42'
- * @param {string} s3Bucket - R2 bucket name
- * @param {string} s3Key - R2 object key
+ * @param {Buffer} imageBuffer - raw image bytes downloaded from R2
  * @param {string} externalImageId - usually String(photo_id)
  * @returns {Array<{ faceId, confidence, boundingBox }>}
  */
-async function indexFaces(collectionId, s3Bucket, s3Key, externalImageId) {
+async function indexFaces(collectionId, imageBuffer, externalImageId) {
   const command = new IndexFacesCommand({
     CollectionId: collectionId,
-    Image: {
-      S3Object: { Bucket: s3Bucket, Name: s3Key },
-    },
+    Image: { Bytes: imageBuffer },
     ExternalImageId: externalImageId,
     DetectionAttributes: [],
     QualityFilter: 'NONE',

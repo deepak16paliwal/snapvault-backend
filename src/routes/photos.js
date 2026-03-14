@@ -208,8 +208,7 @@ router.post('/confirm', authenticate, [
       try {
         const faces = await rekognitionService.indexFaces(
           collectionId,
-          require('../config/env').r2.bucket,
-          photo.s3_key,
+          buffer,
           String(photo.id)
         );
         if (faces.length > 0) {
