@@ -3,7 +3,6 @@ const router = express.Router();
 const { User, Event, EventMember, Photo } = require('../models');
 const { authenticate } = require('../middleware/authMiddleware');
 const { getDownloadUrl } = require('../services/s3Service');
-const sequelize = require('../config/database');
 
 // GET /users/:id/profile
 // Returns organizer profile info + events shared between the organizer and the requesting user.
@@ -22,7 +21,7 @@ router.get('/:id/profile', authenticate, async (req, res) => {
       where: {
         organizer_id: organizerId,
         is_active: true,
-        deleted_at: null,
+        soft_deleted_at: null,
       },
       include: [
         {
