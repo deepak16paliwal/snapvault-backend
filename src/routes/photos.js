@@ -180,9 +180,18 @@ router.post('/confirm', authenticate, [
       // Face indexing — images only
       if (photo.mime_type && photo.mime_type.startsWith('video/')) return;
 
+      // Download buffer once — reused for hash, dedup, and face indexing
+      let buffer = null;
+      try {
+        buffer = await downloadBuffer(photo.s3_key);
+      } catch (dlErr) {
+        console.error(`[FaceIndex] Failed to download photo ${photo.id} from R2:`, dlErr.message);
+        await photo.update({ face_index_status: 'failed' }).catch(() => {});
+        return;
+      }
+
       // Compute perceptual hash and check for duplicates before calling Rekognition
       try {
-        const buffer = await downloadBuffer(photo.s3_key);
         const imageHash = await computeImageHash(buffer);
         await photo.update({ image_hash: imageHash });
 
