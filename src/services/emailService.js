@@ -10,32 +10,40 @@ function emailBase({ preheader = '', body }) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
   <title>SnapLivo</title>
+  <style>
+    @media only screen and (max-width:600px) {
+      .email-wrap { padding: 12px 8px !important; }
+      .email-card { padding: 20px 16px 16px !important; }
+      .email-footer { padding: 12px 0 6px !important; }
+    }
+  </style>
 </head>
 <body style="margin:0;padding:0;background-color:#0A0F1E;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;">${preheader}</div>` : ''}
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0A0F1E;min-height:100vh;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0A0F1E;">
     <tr>
-      <td align="center" style="padding:40px 16px;">
+      <td align="center" class="email-wrap" style="padding:20px 12px;">
         <table width="100%" style="max-width:560px;" cellpadding="0" cellspacing="0">
 
           <!-- Header -->
           <tr>
-            <td align="center" style="padding-bottom:28px;">
-              <span style="font-size:26px;font-weight:800;color:#62D0F5;letter-spacing:-0.5px;">SnapLivo</span>
+            <td align="center" style="padding-bottom:16px;">
+              <span style="font-size:24px;font-weight:800;color:#62D0F5;letter-spacing:-0.5px;">SnapLivo</span>
             </td>
           </tr>
 
           <!-- Card -->
           <tr>
-            <td style="background:#ffffff;border-radius:12px;padding:36px 36px 28px;box-shadow:0 4px 24px rgba(0,0,0,0.4);">
+            <td class="email-card" style="background:#ffffff;border-radius:12px;padding:28px 24px 20px;box-shadow:0 4px 24px rgba(0,0,0,0.4);">
               ${body}
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td align="center" style="padding:28px 0 8px;">
+            <td align="center" class="email-footer" style="padding:16px 0 8px;">
               <p style="margin:0;font-size:13px;color:#4B5563;">
                 © 2026 SnapLivo &nbsp;·&nbsp;
                 <a href="mailto:support@snaplivo.in" style="color:#62D0F5;text-decoration:none;">support@snaplivo.in</a>
