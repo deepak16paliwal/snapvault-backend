@@ -273,6 +273,97 @@ async function sendGracePeriodExpiredEmail(toEmail) {
   });
 }
 
+// ─── 7. Contact form — admin notification ─────────────────────────────────────
+
+async function sendContactAdminEmail(name, fromEmail, message) {
+  const now = new Date().toLocaleString('en-IN', {
+    day: 'numeric', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
+  });
+
+  const html = emailBase({
+    preheader: `New contact message from ${name}`,
+    body: `
+      <h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827;">New Contact Message</h2>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #E5E7EB;width:90px;font-size:14px;font-weight:600;color:#6B7280;">Name</td>
+          <td style="padding:10px 0;border-bottom:1px solid #E5E7EB;font-size:15px;color:#111827;">${name}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #E5E7EB;font-size:14px;font-weight:600;color:#6B7280;">Email</td>
+          <td style="padding:10px 0;border-bottom:1px solid #E5E7EB;font-size:15px;color:#111827;">
+            <a href="mailto:${fromEmail}" style="color:#0369A1;">${fromEmail}</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 0;font-size:14px;font-weight:600;color:#6B7280;vertical-align:top;">Time</td>
+          <td style="padding:10px 0;font-size:14px;color:#6B7280;">${now} IST</td>
+        </tr>
+      </table>
+      <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#374151;">Message:</p>
+      <div style="background:#F3F4F6;border-radius:8px;padding:16px 20px;margin-bottom:28px;">
+        <p style="margin:0;font-size:15px;color:#111827;line-height:1.7;white-space:pre-wrap;">${message}</p>
+      </div>
+      <table cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <a href="mailto:${fromEmail}?subject=Re: Your SnapLivo enquiry" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:700;text-decoration:none;">Reply to ${name}</a>
+          </td>
+        </tr>
+      </table>
+    `,
+  });
+
+  await sendEmail({
+    to: 'deepakpaliwal16@gmail.com',
+    subject: `New Contact Message from ${name} <${fromEmail}>`,
+    html,
+    text: `New contact message from ${name} (${fromEmail})\n\nMessage:\n${message}\n\nTime: ${now} IST`,
+  });
+}
+
+// ─── 8. Contact form — user confirmation ──────────────────────────────────────
+
+async function sendContactConfirmationEmail(name, toEmail, message) {
+  const html = emailBase({
+    preheader: 'We received your message and will get back to you shortly',
+    body: `
+      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">We got your message!</h2>
+      <p style="margin:0 0 24px;font-size:15px;color:#4B5563;line-height:1.6;">
+        Hi <strong style="color:#111827;">${name}</strong>,<br/><br/>
+        Thank you for reaching out to SnapLivo. We've received your message and our team will get back to you within <strong style="color:#111827;">24–48 hours</strong>.
+      </p>
+      <div style="background:#F3F4F6;border-radius:8px;padding:16px 20px;margin-bottom:28px;">
+        <p style="margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#6B7280;">Your message</p>
+        <p style="margin:0;font-size:14px;color:#374151;line-height:1.7;white-space:pre-wrap;">${message}</p>
+      </div>
+      <p style="margin:0 0 28px;font-size:15px;color:#4B5563;line-height:1.6;">
+        In the meantime, feel free to explore SnapLivo — capture every moment and find every memory with face recognition.
+      </p>
+      <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+        <tr>
+          <td>
+            <a href="https://snaplivo.in" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:13px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;">Visit SnapLivo</a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;font-size:13px;color:#6B7280;">
+        If you have additional questions, reply to this email or write to us at
+        <a href="mailto:support@snaplivo.in" style="color:#0369A1;">support@snaplivo.in</a>.
+      </p>
+      <p style="margin:12px 0 0;font-size:13px;color:#6B7280;">— The SnapLivo Team</p>
+    `,
+  });
+
+  await sendEmail({
+    to: toEmail,
+    subject: 'We received your message — SnapLivo',
+    html,
+    text: `Hi ${name},\n\nThank you for reaching out to SnapLivo! We've received your message and will get back to you within 24–48 hours.\n\nYour message:\n"${message}"\n\nIn the meantime, visit us at https://snaplivo.in\n\n— The SnapLivo Team`,
+  });
+}
+
 module.exports = {
   sendOtpEmail,
   sendAddedToEventEmail,
@@ -280,4 +371,6 @@ module.exports = {
   sendSubscriptionExpiryWarning,
   sendPaymentFailedEmail,
   sendGracePeriodExpiredEmail,
+  sendContactAdminEmail,
+  sendContactConfirmationEmail,
 };
