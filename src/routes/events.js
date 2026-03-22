@@ -148,7 +148,7 @@ router.post('/join/:token', authenticate, async (req, res) => {
     res.status(201).json({
       message: 'Joined event successfully',
       event_id: event.id,
-      invite_link: `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`,
+      invite_link: `${process.env.FRONTEND_URL || 'https://snaplivo.in'}/join/${event.invite_token}`,
     });
   } catch (err) {
     console.error('Join event error:', err);
@@ -183,7 +183,7 @@ router.get('/:id', authenticate, async (req, res) => {
           ? await getDownloadUrl(event.cover_storage_key)
           : event.cover_photo_url || null,
         invite_link: membership.role === 'organizer'
-          ? `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`
+          ? `${process.env.FRONTEND_URL || 'https://snaplivo.in'}/join/${event.invite_token}`
           : undefined,
         photo_count: photoCount,
       },
@@ -287,7 +287,8 @@ router.post('/:id/add-member', authenticate, requireRole('organizer'), [
     });
     if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
 
-    const inviteLink = `${req.protocol}://${req.get('host')}/events/join/${event.invite_token}`;
+    const inviteLink = `${process.env.FRONTEND_URL || 'https://snaplivo.in'}/join/${event.invite_token}`;
+
     const { email, access_type } = req.body;
 
     const targetUser = await User.findOne({ where: { email, is_active: true } });

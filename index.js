@@ -21,6 +21,7 @@ const { up: runMigration16 } = require('./src/migrations/016_event_soft_delete')
 const { up: runMigration17 } = require('./src/migrations/017_cover_storage_key');
 const { up: runMigration18 } = require('./src/migrations/018_photo_hash');
 const { up: runMigration19 } = require('./src/migrations/019_photo_faces_event');
+const { up: runMigration20 } = require('./src/migrations/020_contact_messages');
 const { startExpiryJob } = require('./src/jobs/eventExpiryJob');
 const { startSubscriptionJob } = require('./src/jobs/subscriptionJob');
 
@@ -53,6 +54,7 @@ async function start() {
     await runMigration17();
     await runMigration18();
     await runMigration19();
+    await runMigration20();
 
     // Start server
     app.listen(env.port, () => {

@@ -28,7 +28,7 @@ steps:
       - --max-instances=5
       - --add-cloudsql-instances=snapvault-489304:asia-south1:snapvault-dev
       - --set-secrets=DB_USER=DB_USER_DEV:latest,DB_PASS=DB_PASSWORD_DEV:latest,DB_NAME=DB_NAME_DEV:latest,REDIS_URL=REDIS_URL_DEV:latest,JWT_SECRET=JWT_SECRET_DEV:latest,AWS_ACCESS_KEY_ID=AWS_ACCESS_KEY_ID_DEV:latest,AWS_SECRET_ACCESS_KEY=AWS_SECRET_ACCESS_KEY_DEV:latest,AWS_REGION=AWS_REGION_DEV:latest,REKOGNITION_COLLECTION=REKOGNITION_COLLECTION_DEV:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID_DEV:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET_DEV:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET_DEV:latest,SMTP_HOST=EMAIL_HOST_DEV:latest,SMTP_PORT=EMAIL_PORT_DEV:latest,SMTP_USER=EMAIL_USER_DEV:latest,SMTP_PASS=EMAIL_PASS_DEV:latest,FIREBASE_SA_JSON=FIREBASE_SA_JSON_DEV:latest,R2_ACCOUNT_ID=R2_ACCOUNT_ID:latest,R2_ACCESS_KEY_ID=R2_ACCESS_KEY_ID:latest,R2_SECRET_ACCESS_KEY=R2_SECRET_ACCESS_KEY:latest
-      - --set-env-vars=^;^NODE_ENV=development;DB_SOCKET_PATH=/cloudsql/snapvault-489304:asia-south1:snapvault-dev;ALLOWED_ORIGINS=http://localhost:3000,https://dev.snaplivo.in;R2_BUCKET=snaplivo-photos
+      - --set-env-vars=^;^NODE_ENV=development;DB_SOCKET_PATH=/cloudsql/snapvault-489304:asia-south1:snapvault-dev;ALLOWED_ORIGINS=http://localhost:3000,https://dev.snaplivo.in;R2_BUCKET=snaplivo-photos;COMFYUI_URL=http://COMFYUI_VM_INTERNAL_IP:8188
 
 options:
   logging: CLOUD_LOGGING_ONLY
