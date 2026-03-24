@@ -31,6 +31,82 @@ router.post('/razorpay', express.raw({ type: 'application/json' }), async (req, 
   const event = payload.event;
 
   try {
+    if (event === 'payment.captured') {
+      const orderId = payload.payload?.payment?.entity?.order_id;
+      const paymentId = payload.payload?.payment?.entity?.id;
+      if (orderId) {
+        const sub = await Subscription.findOne({ where: { razorpay_order_id: orderId } });
+        if (sub && sub.status !== 'active') {
+          const now = new Date();
+          const expiresAt = new Date(now);
+          expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+          await sub.update({
+            status: 'active',
+            razorpay_payment_id: paymentId,
+            started_at: now,
+            expires_at: expiresAt,
+          });
+          await User.update(
+            { subscription_plan: sub.plan_key },
+            { where: { id: sub.user_id } }
+          );
+          setImmediate(() => {
+            sendNotification({
+              userId: sub.user_id,
+              type: 'payment_success',
+              title: 'Subscription Activated',
+              body: 'Your subscription is now active. Enjoy SnapVault!',
+              data: { screen: 'billing_status' },
+            }).catch(() => {});
+          });
+        }
+      }
+    }
+
+    if (event === 'subscription.charged') {
+      const subId = payload.payload?.subscription?.entity?.id;
+      const paymentId = payload.payload?.payment?.entity?.id;
+      if (subId) {
+        const sub = await Subscription.findOne({ where: { razorpay_order_id: subId } });
+        if (sub) {
+          const expiresAt = new Date(sub.expires_at || new Date());
+          expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+          await sub.update({ status: 'active', expires_at: expiresAt, razorpay_payment_id: paymentId });
+          await User.update({ subscription_plan: sub.plan_key }, { where: { id: sub.user_id } });
+          setImmediate(() => {
+            sendNotification({
+              userId: sub.user_id,
+              type: 'payment_success',
+              title: 'Subscription Renewed',
+              body: 'Your subscription has been renewed for another year.',
+              data: { screen: 'billing_status' },
+            }).catch(() => {});
+          });
+        }
+      }
+    }
+
+    if (event === 'subscription.halted') {
+      const subId = payload.payload?.subscription?.entity?.id;
+      if (subId) {
+        const sub = await Subscription.findOne({ where: { razorpay_order_id: subId } });
+        if (sub) {
+          const graceUntil = new Date();
+          graceUntil.setDate(graceUntil.getDate() + 30);
+          await sub.update({ status: 'grace_period', grace_until: graceUntil });
+          setImmediate(() => {
+            sendNotification({
+              userId: sub.user_id,
+              type: 'payment_failed',
+              title: 'Subscription Halted',
+              body: 'Your subscription renewal failed. You have a 30-day grace period to renew.',
+              data: { screen: 'billing_status' },
+            }).catch(() => {});
+          });
+        }
+      }
+    }
+
     if (event === 'payment.failed') {
       const orderId = payload.payload?.payment?.entity?.order_id;
       if (orderId) {

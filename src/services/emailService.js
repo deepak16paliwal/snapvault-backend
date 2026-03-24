@@ -76,23 +76,71 @@ async function sendEmail({ to, subject, html, text }) {
 
 // ─── 1. OTP ───────────────────────────────────────────────────────────────────
 
+// ── Shared HTML wrapper — mobile-compatible ───────────────────────────────────
+function emailBase(content) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <style>
+    body { margin: 0; padding: 0; background-color: #0A0F1E; }
+    @media only screen and (max-width: 600px) {
+      .email-card { padding: 20px 16px 16px !important; }
+      .email-wrap { padding: 12px 8px !important; }
+      .email-footer { padding: 12px 0 8px !important; }
+    }
+  </style>
+</head>
+<body>
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0A0F1E;">
+    <tr>
+      <td align="center" class="email-wrap" style="padding:20px 12px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+          <!-- Header -->
+          <tr>
+            <td align="center" style="padding:0 0 16px 0;">
+              <span style="font-family:sans-serif;font-size:24px;font-weight:800;color:#62D0F5;letter-spacing:1px;">SnapLivo</span>
+            </td>
+          </tr>
+          <!-- Card -->
+          <tr>
+            <td class="email-card" style="background:#ffffff;border-radius:10px;padding:28px 28px 20px;font-family:sans-serif;">
+              ${content}
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td align="center" class="email-footer" style="padding:16px 0 8px;font-family:sans-serif;font-size:12px;color:#6B7280;">
+              <a href="mailto:support@snaplivo.in" style="color:#62D0F5;text-decoration:none;">support@snaplivo.in</a>
+              &nbsp;·&nbsp; SnapLivo
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ── Email functions ───────────────────────────────────────────────────────────
+
 async function sendOtpEmail(toEmail, otp) {
   if (process.env.DEMO_EMAIL && toEmail === process.env.DEMO_EMAIL) return;
 
-  const html = emailBase({
-    preheader: `Your SnapLivo verification code is ${otp}`,
-    body: `
-      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Verify your email</h2>
-      <p style="margin:0 0 28px;font-size:15px;color:#4B5563;line-height:1.6;">
-        Use the code below to sign in to SnapLivo. It expires in <strong>10 minutes</strong>.
-      </p>
-      <div style="background:#F0F9FF;border:1px solid #BAE6FD;border-radius:10px;padding:28px;text-align:center;margin-bottom:28px;">
-        <span style="font-size:48px;font-weight:800;letter-spacing:14px;color:#0369A1;font-variant-numeric:tabular-nums;">${otp}</span>
-      </div>
-      <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
-        If you didn't request this, you can safely ignore this email. Never share this code with anyone.
-      </p>
-    `,
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: 'Your SnapLivo OTP',
+    text: `Your SnapLivo OTP is: ${otp}\n\nThis code is valid for 10 minutes. Do not share it with anyone.`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">Verify your identity</h2>
+      <p style="color:#444;margin:0 0 16px;">Your one-time password is:</p>
+      <div style="font-size:42px;font-weight:800;letter-spacing:12px;color:#0A7BBF;margin:0 0 20px;text-align:center;">${otp}</div>
+      <p style="color:#666;font-size:13px;margin:0;">Valid for <strong>10 minutes</strong>. Do not share this code with anyone.</p>
+    `),
   });
 
   await sendEmail({
@@ -106,22 +154,19 @@ async function sendOtpEmail(toEmail, otp) {
 // ─── 2. Added to event ────────────────────────────────────────────────────────
 
 async function sendAddedToEventEmail(toEmail, eventTitle, organizerName) {
-  const html = emailBase({
-    preheader: `${organizerName} added you to "${eventTitle}"`,
-    body: `
-      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">You've been added to an event!</h2>
-      <p style="margin:0 0 24px;font-size:15px;color:#4B5563;line-height:1.6;">
-        <strong style="color:#111827;">${organizerName}</strong> has added you to the following event on SnapLivo:
-      </p>
-      <div style="background:linear-gradient(135deg,#0369A1,#0891B2);border-radius:10px;padding:22px 24px;margin-bottom:28px;">
-        <p style="margin:0;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Event</p>
-        <p style="margin:6px 0 0;font-size:20px;font-weight:700;color:#ffffff;">${eventTitle}</p>
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: `You've been added to "${eventTitle}" on SnapLivo`,
+    text: `Hi,\n\n${organizerName} has added you to the event "${eventTitle}" on SnapLivo.\n\nOpen the app to view photos and join the fun!\n\n— SnapLivo`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">You've been added to an event!</h2>
+      <p style="color:#444;margin:0 0 12px;"><strong>${organizerName}</strong> has added you to:</p>
+      <div style="background:linear-gradient(135deg,#0A7BBF,#62D0F5);color:#fff;border-radius:8px;padding:16px 20px;margin:0 0 16px;">
+        <strong style="font-size:18px;">${eventTitle}</strong>
       </div>
-      <p style="margin:0 0 24px;font-size:15px;color:#4B5563;line-height:1.6;">
-        Open the SnapLivo app to view photos and join the celebration.
-      </p>
-      <p style="margin:0;font-size:13px;color:#6B7280;">— The SnapLivo Team</p>
-    `,
+      <p style="color:#555;margin:0 0 16px;">Open the SnapLivo app to view photos and participate.</p>
+    `),
   });
 
   await sendEmail({
@@ -135,30 +180,19 @@ async function sendAddedToEventEmail(toEmail, eventTitle, organizerName) {
 // ─── 3. Event invite ──────────────────────────────────────────────────────────
 
 async function sendEventInviteEmail(toEmail, eventTitle, organizerName, inviteLink) {
-  const html = emailBase({
-    preheader: `${organizerName} invited you to "${eventTitle}"`,
-    body: `
-      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">You're invited!</h2>
-      <p style="margin:0 0 24px;font-size:15px;color:#4B5563;line-height:1.6;">
-        <strong style="color:#111827;">${organizerName}</strong> has invited you to join an event on SnapLivo — where you can instantly find your photos using face recognition.
-      </p>
-      <div style="background:linear-gradient(135deg,#0369A1,#0891B2);border-radius:10px;padding:22px 24px;margin-bottom:28px;">
-        <p style="margin:0;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Event</p>
-        <p style="margin:6px 0 0;font-size:20px;font-weight:700;color:#ffffff;">${eventTitle}</p>
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: `You're invited to "${eventTitle}" on SnapLivo`,
+    text: `Hi,\n\n${organizerName} has invited you to join the event "${eventTitle}" on SnapLivo.\n\nJoin here:\n${inviteLink}\n\n— SnapLivo`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">You're invited!</h2>
+      <p style="color:#444;margin:0 0 12px;"><strong>${organizerName}</strong> invited you to join:</p>
+      <div style="background:linear-gradient(135deg,#0A7BBF,#62D0F5);color:#fff;border-radius:8px;padding:16px 20px;margin:0 0 20px;">
+        <strong style="font-size:18px;">${eventTitle}</strong>
       </div>
-      <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-        <tr>
-          <td>
-            <a href="${inviteLink}" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:13px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;">Join Event</a>
-          </td>
-        </tr>
-      </table>
-      <p style="margin:0 0 8px;font-size:13px;color:#6B7280;">
-        Or copy this link into your browser:<br/>
-        <a href="${inviteLink}" style="color:#0369A1;word-break:break-all;">${inviteLink}</a>
-      </p>
-      <p style="margin:16px 0 0;font-size:13px;color:#6B7280;">— The SnapLivo Team</p>
-    `,
+      <a href="${inviteLink}" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">Join Event</a>
+    `),
   });
 
   await sendEmail({
@@ -173,28 +207,17 @@ async function sendEventInviteEmail(toEmail, eventTitle, organizerName, inviteLi
 
 async function sendSubscriptionExpiryWarning(toEmail, planName, expiryDate) {
   const formatted = expiryDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-
-  const html = emailBase({
-    preheader: `Your ${planName} plan expires on ${formatted}`,
-    body: `
-      <div style="background:#FEF3C7;border-left:4px solid #F59E0B;border-radius:6px;padding:14px 18px;margin-bottom:24px;">
-        <p style="margin:0;font-size:14px;font-weight:600;color:#92400E;">⚠️ Your plan expires in 7 days</p>
-      </div>
-      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Renew to keep access</h2>
-      <p style="margin:0 0 24px;font-size:15px;color:#4B5563;line-height:1.6;">
-        Your <strong style="color:#111827;">${planName}</strong> plan on SnapLivo will expire on
-        <strong style="color:#111827;">${formatted}</strong>.
-        Renew now to keep your events, photos, and premium features active without interruption.
-      </p>
-      <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-        <tr>
-          <td>
-            <a href="https://snaplivo.in/pricing" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:13px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;">Renew Now</a>
-          </td>
-        </tr>
-      </table>
-      <p style="margin:0;font-size:13px;color:#6B7280;">— The SnapLivo Team</p>
-    `,
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: `Your SnapLivo ${planName} plan expires in 7 days`,
+    text: `Hi,\n\nYour SnapLivo ${planName} plan will expire on ${formatted}.\n\nRenew now to keep your photos, events, and features active.\n\n— SnapLivo`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">⚠️ Your plan expires soon</h2>
+      <p style="color:#444;margin:0 0 12px;">Your <strong>${planName}</strong> plan will expire on <strong>${formatted}</strong>.</p>
+      <p style="color:#555;margin:0 0 20px;">Renew now to keep your storage, events, and features active.</p>
+      <a href="https://snaplivo.in/pricing" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">Renew Now</a>
+    `),
   });
 
   await sendEmail({
@@ -208,35 +231,17 @@ async function sendSubscriptionExpiryWarning(toEmail, planName, expiryDate) {
 // ─── 5. Payment failed ────────────────────────────────────────────────────────
 
 async function sendPaymentFailedEmail(toEmail, planName) {
-  const html = emailBase({
-    preheader: `Action required: payment failed for your ${planName} plan`,
-    body: `
-      <div style="background:#FEE2E2;border-left:4px solid #EF4444;border-radius:6px;padding:14px 18px;margin-bottom:24px;">
-        <p style="margin:0;font-size:14px;font-weight:600;color:#991B1B;">Payment unsuccessful</p>
-      </div>
-      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">We couldn't process your payment</h2>
-      <p style="margin:0 0 16px;font-size:15px;color:#4B5563;line-height:1.6;">
-        We were unable to charge your payment method for the
-        <strong style="color:#111827;">${planName}</strong> plan.
-      </p>
-      <p style="margin:0 0 28px;font-size:15px;color:#4B5563;line-height:1.6;">
-        You have a <strong style="color:#111827;">15-day grace period</strong> to complete your payment.
-        After that, your account will be automatically downgraded to the Free plan and some features
-        may become unavailable.
-      </p>
-      <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-        <tr>
-          <td>
-            <a href="https://snaplivo.in" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:13px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;">Retry Payment</a>
-          </td>
-        </tr>
-      </table>
-      <p style="margin:0;font-size:13px;color:#6B7280;">
-        If you need help, contact us at
-        <a href="mailto:support@snaplivo.in" style="color:#0369A1;">support@snaplivo.in</a>
-      </p>
-      <p style="margin:12px 0 0;font-size:13px;color:#6B7280;">— The SnapLivo Team</p>
-    `,
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: 'SnapLivo payment failed — action required',
+    text: `Hi,\n\nWe were unable to process your payment for the ${planName} plan.\n\nYou have a 15-day grace period to complete your payment. After that, your account will be downgraded to the Free plan.\n\nOpen the app to retry your payment.\n\n— SnapLivo`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#dc2626;font-size:20px;">Payment failed</h2>
+      <p style="color:#444;margin:0 0 12px;">We were unable to process your payment for the <strong>${planName}</strong> plan.</p>
+      <p style="color:#555;margin:0 0 20px;">You have a <strong>15-day grace period</strong> to complete your payment. After that, your account will be downgraded to the Free plan.</p>
+      <p style="color:#555;margin:0;">Open the SnapLivo app to retry your payment.</p>
+    `),
   });
 
   await sendEmail({
@@ -250,27 +255,55 @@ async function sendPaymentFailedEmail(toEmail, planName) {
 // ─── 6. Grace period expired ──────────────────────────────────────────────────
 
 async function sendGracePeriodExpiredEmail(toEmail) {
-  const html = emailBase({
-    preheader: 'Your SnapLivo subscription has ended — account downgraded to Free',
-    body: `
-      <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Your subscription has ended</h2>
-      <p style="margin:0 0 16px;font-size:15px;color:#4B5563;line-height:1.6;">
-        Your grace period has ended and your account has been downgraded to the
-        <strong style="color:#111827;">Free</strong> plan.
-      </p>
-      <p style="margin:0 0 28px;font-size:15px;color:#4B5563;line-height:1.6;">
-        Your photos and events are safe. Renew anytime to restore full access to premium features,
-        higher storage limits, and bulk downloads.
-      </p>
-      <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
-        <tr>
-          <td>
-            <a href="https://snaplivo.in/pricing" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:13px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;">Upgrade Now</a>
-          </td>
-        </tr>
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: 'Your SnapLivo subscription has ended',
+    text: `Hi,\n\nYour grace period has ended and your account has been downgraded to the Free plan.\n\nYour photos and events are safe, but some premium features are now limited. Renew anytime to restore full access.\n\n— SnapLivo`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">Subscription ended</h2>
+      <p style="color:#444;margin:0 0 12px;">Your grace period has ended. Your account has been downgraded to the <strong>Free</strong> plan.</p>
+      <p style="color:#555;margin:0 0 20px;">Your photos and events are safe, but premium features are now limited.</p>
+      <a href="https://snaplivo.in/pricing" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">Renew Now</a>
+    `),
+  });
+}
+
+async function sendContactAdminEmail(name, fromEmail, message) {
+  const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  await transporter.sendMail({
+    from: env.email.from,
+    to: 'deepakpaliwal16@gmail.com',
+    subject: `New Contact Message from ${name}`,
+    text: `Name: ${name}\nEmail: ${fromEmail}\n\nMessage:\n${message}\n\nReceived at: ${timestamp}`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">New Contact Message</h2>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;color:#666;font-size:13px;width:60px;">Name</td><td style="padding:6px 0;color:#111;font-weight:600;">${name}</td></tr>
+        <tr><td style="padding:6px 0;color:#666;font-size:13px;">Email</td><td style="padding:6px 0;"><a href="mailto:${fromEmail}" style="color:#0A7BBF;">${fromEmail}</a></td></tr>
       </table>
-      <p style="margin:0;font-size:13px;color:#6B7280;">— The SnapLivo Team</p>
-    `,
+      <div style="background:#f3f4f6;border-radius:6px;padding:14px 16px;margin:0 0 20px;color:#333;font-size:14px;line-height:1.6;white-space:pre-wrap;">${message}</div>
+      <a href="mailto:${fromEmail}" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:10px 22px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">Reply to ${name}</a>
+      <p style="color:#999;font-size:11px;margin:16px 0 0;">Received: ${timestamp} IST</p>
+    `),
+  });
+}
+
+async function sendContactConfirmationEmail(name, toEmail, message) {
+  await transporter.sendMail({
+    from: env.email.from,
+    to: toEmail,
+    subject: 'We received your message — SnapLivo',
+    text: `Hi ${name},\n\nThanks for reaching out! We've received your message and will get back to you within 24–48 hours.\n\nYour message:\n${message}\n\n— SnapLivo\nsupport@snaplivo.in`,
+    html: emailBase(`
+      <h2 style="margin:0 0 12px;color:#0A0F1E;font-size:20px;">We got your message!</h2>
+      <p style="color:#444;margin:0 0 12px;">Hi <strong>${name}</strong>,</p>
+      <p style="color:#555;margin:0 0 16px;">Thanks for reaching out to SnapLivo! We've received your message and will get back to you within <strong>24–48 hours</strong>.</p>
+      <p style="color:#666;font-size:13px;margin:0 0 6px;">Your message:</p>
+      <div style="background:#f3f4f6;border-radius:6px;padding:14px 16px;margin:0 0 20px;color:#444;font-size:14px;line-height:1.6;white-space:pre-wrap;">${message}</div>
+      <p style="color:#555;margin:0 0 20px;">In the meantime, feel free to explore SnapLivo.</p>
+      <a href="https://snaplivo.in" style="display:inline-block;background:#62D0F5;color:#0A0F1E;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">Visit SnapLivo</a>
+    `),
   });
 
   await sendEmail({
