@@ -206,6 +206,126 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   res.json({ received: true });
 });
 
+// ── GET /billing/receipt/:id ───────────────────────────────────────────────
+router.get('/receipt/:id', authenticate, requireOrganizer, async (req, res) => {
+  try {
+    const sub = await Subscription.findOne({
+      where: { id: req.params.id, user_id: req.user.id },
+      include: [{ model: Plan, foreignKey: 'plan_key', as: 'Plan' }],
+    });
+    if (!sub) return res.status(404).json({ error: 'Receipt not found' });
+
+    const amountINR = ((sub.amount_paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+    const purchaseDate = new Date(sub.start_date || sub.created_at).toLocaleDateString('en-IN', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    });
+    const validUntil = sub.end_date
+      ? new Date(sub.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+    const planName = sub.Plan?.name || sub.plan_key;
+    const receiptNo = `SLRCP-${sub.id.toString().padStart(6, '0')}`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Receipt ${receiptNo} — SnapLivo</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f4f5f7; display: flex; justify-content: center; padding: 40px 16px; }
+    .card { background: #fff; max-width: 560px; width: 100%; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 32px rgba(0,0,0,0.10); }
+    .header { background: linear-gradient(135deg, #0A0F1E 0%, #1a1040 100%); padding: 32px 36px; }
+    .brand { font-size: 26px; font-weight: 800; color: #62D0F5; letter-spacing: -0.5px; }
+    .badge { display: inline-block; background: #22c55e; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; padding: 3px 10px; border-radius: 20px; margin-top: 10px; }
+    .body { padding: 32px 36px; }
+    .receipt-no { font-size: 13px; color: #9ca3af; margin-bottom: 24px; }
+    .receipt-no span { color: #374151; font-weight: 600; }
+    .amount-row { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; }
+    .amount-label { font-size: 14px; color: #6b7280; }
+    .amount-value { font-size: 30px; font-weight: 800; color: #111827; }
+    .rows { display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+    .row { display: flex; justify-content: space-between; align-items: center; }
+    .row-label { font-size: 13px; color: #9ca3af; }
+    .row-value { font-size: 14px; color: #111827; font-weight: 500; text-align: right; max-width: 65%; word-break: break-all; }
+    .divider { border: none; border-top: 1px dashed #e5e7eb; margin: 4px 0; }
+    .footer { padding: 20px 36px; background: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center; }
+    .footer p { font-size: 12px; color: #9ca3af; line-height: 1.6; }
+    .footer a { color: #0369a1; text-decoration: none; }
+    .print-btn { display: block; width: 100%; margin-top: 28px; padding: 13px; background: #7b4dff; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .card { box-shadow: none; border-radius: 0; }
+      .print-btn { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="brand">SnapLivo</div>
+      <div class="badge">✓ Payment Confirmed</div>
+    </div>
+    <div class="body">
+      <div class="receipt-no">Receipt No: <span>${receiptNo}</span></div>
+      <div class="amount-row">
+        <div>
+          <div class="amount-label">Amount Paid</div>
+        </div>
+        <div class="amount-value">₹${amountINR}</div>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <span class="row-label">Plan</span>
+          <span class="row-value">${planName} — Annual</span>
+        </div>
+        <hr class="divider"/>
+        <div class="row">
+          <span class="row-label">Purchase Date</span>
+          <span class="row-value">${purchaseDate}</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Valid Until</span>
+          <span class="row-value">${validUntil}</span>
+        </div>
+        <hr class="divider"/>
+        <div class="row">
+          <span class="row-label">Payment ID</span>
+          <span class="row-value">${sub.razorpay_payment_id || '—'}</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Order ID</span>
+          <span class="row-value">${sub.razorpay_order_id || '—'}</span>
+        </div>
+        <hr class="divider"/>
+        <div class="row">
+          <span class="row-label">Billed To</span>
+          <span class="row-value">${req.user.email}</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Status</span>
+          <span class="row-value" style="color:#22c55e;font-weight:700;">Paid</span>
+        </div>
+      </div>
+      <button class="print-btn" onclick="window.print()">Download / Print Receipt</button>
+    </div>
+    <div class="footer">
+      <p>SnapLivo · <a href="mailto:support@snaplivo.in">support@snaplivo.in</a><br/>
+      This is a payment confirmation receipt. For queries, contact support.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (err) {
+    console.error('GET /billing/receipt/:id', err);
+    res.status(500).json({ error: 'Failed to generate receipt' });
+  }
+});
+
 // ── ADMIN: GET /billing/admin/plans ───────────────────────────────────────
 router.get('/admin/plans', authenticate, requireRole('admin'), async (req, res) => {
   try {
