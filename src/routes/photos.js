@@ -562,6 +562,25 @@ router.delete('/:id', authenticate, async (req, res) => {
   }
 });
 
+// GET /photos/:id/download-url
+// Returns a fresh signed URL for a single photo — available to all plans (no bulk_download required).
+router.get('/:id/download-url', authenticate, async (req, res) => {
+  try {
+    const photo = await Photo.findByPk(req.params.id);
+    if (!photo || photo.status !== 'uploaded') return res.status(404).json({ error: 'Photo not found' });
+
+    // Must be event member
+    const membership = await EventMember.findOne({ where: { event_id: photo.event_id, user_id: req.user.id } });
+    if (!membership) return res.status(403).json({ error: 'Access denied' });
+
+    const url = await getDownloadUrl(photo.s3_key, 300); // 5-minute expiry
+    res.json({ url });
+  } catch (err) {
+    console.error('GET /photos/:id/download-url:', err);
+    res.status(500).json({ error: 'Failed to generate download URL' });
+  }
+});
+
 // POST /photos/download-zip
 // Download a batch of photos as a ZIP. Requires bulk_download plan feature.
 // Body: { photo_ids: [1, 2, ...] }
