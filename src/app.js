@@ -72,6 +72,17 @@ const otpLimiter = rateLimit({
 app.use('/auth/send-otp', otpLimiter);
 app.use('/auth/verify-otp', otpLimiter);
 
+// Face-search rate limit: max 5 scans per minute per IP (Rekognition costs money + abuse prevention)
+// Per-user DB limit (2 scans/event) is the real gate; this prevents rapid-fire abuse
+const faceScanLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many face scan requests. Please wait a minute before trying again.' },
+});
+app.use('/photos/face-search', faceScanLimiter);
+
 // Set up model associations (must be before routes)
 require('./models');
 
