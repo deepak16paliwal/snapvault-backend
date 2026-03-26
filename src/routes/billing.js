@@ -150,62 +150,6 @@ router.get('/history', authenticate, requireOrganizer, async (req, res) => {
   }
 });
 
-// ── POST /billing/webhook ──────────────────────────────────────────────────
-// Razorpay webhook — handles payment.failed → starts grace period
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const signature = req.headers['x-razorpay-signature'];
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  if (!secret || !signature) return res.status(400).json({ error: 'Missing signature' });
-
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(req.body)
-    .digest('hex');
-  if (expected !== signature) return res.status(400).json({ error: 'Invalid signature' });
-
-  let event;
-  try {
-    event = JSON.parse(req.body.toString());
-  } catch {
-    return res.status(400).json({ error: 'Invalid JSON' });
-  }
-
-  if (event.event === 'payment.failed') {
-    const orderId = event.payload?.payment?.entity?.order_id;
-    if (orderId) {
-      try {
-        const sub = await Subscription.findOne({
-          where: { razorpay_order_id: orderId, status: 'active' },
-          include: [
-            { model: User, attributes: ['id', 'email'] },
-            { model: Plan, foreignKey: 'plan_key', as: 'Plan', attributes: ['name'] },
-          ],
-        });
-        if (sub) {
-          const graceUntil = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
-          await sub.update({ status: 'grace_period', grace_until: graceUntil });
-          const planName = sub.Plan?.name || sub.plan_key;
-          await sendNotification({
-            userId: sub.user_id,
-            type: 'payment_failed',
-            title: 'Payment Failed',
-            body: `Your payment for the ${planName} plan failed. You have 15 days to retry before downgrade.`,
-            data: { screen: 'billing_status' },
-          }).catch(() => {});
-          if (sub.User?.email) {
-            await sendPaymentFailedEmail(sub.User.email, planName).catch(() => {});
-          }
-          console.log(`[Webhook] payment.failed — user ${sub.user_id} moved to grace_period`);
-        }
-      } catch (err) {
-        console.error('[Webhook] payment.failed handling error:', err.message);
-      }
-    }
-  }
-
-  res.json({ received: true });
-});
-
 // ── GET /billing/receipt/:id ───────────────────────────────────────────────
 router.get('/receipt/:id', authenticate, requireOrganizer, async (req, res) => {
   try {

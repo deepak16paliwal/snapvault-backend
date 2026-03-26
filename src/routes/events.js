@@ -10,6 +10,7 @@ const { authenticate, requireRole } = require('../middleware/authMiddleware');
 const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/emailService');
 const { getUploadUrl, getDownloadUrl } = require('../services/s3Service');
 const { createEventCollection } = require('../services/rekognitionService');
+const { getPlanLimits } = require('../services/quotaService');
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -175,7 +176,12 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'You are not a member of this event' });
     }
 
-    const photoCount = await Photo.count({ where: { event_id: event.id, status: 'uploaded' } });
+    const [photoCount, organizer] = await Promise.all([
+      Photo.count({ where: { event_id: event.id, status: 'uploaded' } }),
+      User.findByPk(event.organizer_id, { attributes: ['subscription_plan'] }),
+    ]);
+
+    const limits = await getPlanLimits(organizer?.subscription_plan || 'free');
 
     res.json({
       event: {
@@ -191,6 +197,7 @@ router.get('/:id', authenticate, async (req, res) => {
       my_role: membership.role,
       my_access_type: membership.access_type,
       my_face_scan_count: membership.face_scan_count,
+      scan_limit: limits?.max_face_scans_per_event ?? null,
     });
   } catch (err) {
     console.error('Get event error:', err);
