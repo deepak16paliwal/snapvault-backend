@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const router = express.Router();
 
 const { Event, EventMember, User, Photo } = require('../models');
+const ConnectionRequest = require('../models/ConnectionRequest');
 const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const { authenticate, requireRole } = require('../middleware/authMiddleware');
@@ -11,6 +12,7 @@ const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/ema
 const { getUploadUrl, getDownloadUrl } = require('../services/s3Service');
 const { createEventCollection } = require('../services/rekognitionService');
 const { getPlanLimits } = require('../services/quotaService');
+const { sendNotification } = require('../services/notificationService');
 
 function validate(req, res) {
   const errors = validationResult(req);
@@ -468,6 +470,110 @@ router.get('/:id/members', authenticate, requireRole('organizer'), async (req, r
   } catch (err) {
     console.error('List members error:', err);
     res.status(500).json({ error: 'Failed to fetch members' });
+  }
+});
+
+// ── POST /events/:id/brand-logo-url ──────────────────────────────────────────
+// Returns a presigned S3 URL for uploading the event brand logo (organizer only)
+router.post('/:id/brand-logo-url', authenticate, requireRole('organizer'), async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const { filename, mime_type } = req.body;
+    const ext = (filename || 'logo').split('.').pop() || 'png';
+    const storageKey = `events/${event.id}/brand/${Date.now()}.${ext}`;
+    const uploadUrl = await getUploadUrl(storageKey, mime_type || 'image/png');
+    res.json({ upload_url: uploadUrl, storage_key: storageKey });
+  } catch (err) {
+    console.error('Brand logo URL error:', err);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
+// ── PATCH /events/:id/brand-logo ─────────────────────────────────────────────
+// Confirm brand logo upload — saves the public URL on the event
+router.patch('/:id/brand-logo', authenticate, requireRole('organizer'), async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const { brand_logo_url } = req.body;
+    if (!brand_logo_url) return res.status(400).json({ error: 'brand_logo_url required' });
+
+    await event.update({ brand_logo_url });
+    res.json({ success: true, brand_logo_url });
+  } catch (err) {
+    console.error('Brand logo confirm error:', err);
+    res.status(500).json({ error: 'Failed to save brand logo' });
+  }
+});
+
+// ── DELETE /events/:id/brand-logo ─────────────────────────────────────────────
+// Remove brand logo from event
+router.delete('/:id/brand-logo', authenticate, requireRole('organizer'), async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    await event.update({ brand_logo_url: null });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Brand logo delete error:', err);
+    res.status(500).json({ error: 'Failed to remove brand logo' });
+  }
+});
+
+// ── POST /events/:id/connect ──────────────────────────────────────────────────
+// Guest sends a connection request to the event organizer
+router.post('/:id/connect', authenticate, async (req, res) => {
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    // Must be a member of the event
+    const membership = await EventMember.findOne({
+      where: { event_id: event.id, user_id: req.user.id },
+    });
+    if (!membership) return res.status(403).json({ error: 'You are not a member of this event' });
+
+    // Can't connect to yourself
+    if (event.organizer_id === req.user.id) {
+      return res.status(400).json({ error: 'You are the organizer of this event' });
+    }
+
+    const { message } = req.body;
+
+    // Upsert — allow updating the message if request already exists
+    await ConnectionRequest.upsert({
+      event_id: event.id,
+      requester_id: req.user.id,
+      organizer_id: event.organizer_id,
+      message: message?.trim()?.slice(0, 300) || null,
+    });
+
+    // Notify organizer
+    const requester = await User.findByPk(req.user.id, { attributes: ['name'] });
+    await sendNotification({
+      userId: event.organizer_id,
+      type: 'connect_request',
+      title: 'New Connection Request',
+      body: `${requester?.name || 'A guest'} from "${event.title}" wants to connect with you`,
+      data: { event_id: String(event.id), screen: 'connect_requests' },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Connect request error:', err);
+    res.status(500).json({ error: 'Failed to send connection request' });
   }
 });
 

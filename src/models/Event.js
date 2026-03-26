@@ -14,6 +14,7 @@ const Event = sequelize.define('Event', {
   expires_at: { type: DataTypes.DATE, allowNull: true },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   soft_deleted_at: { type: DataTypes.DATE, allowNull: true },
+  brand_logo_url:  { type: DataTypes.STRING(512), allowNull: true },
 }, {
   tableName: 'events',
   underscored: true,

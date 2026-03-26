@@ -1,7 +1,9 @@
 const express  = require('express');
-const { authenticate } = require('../middleware/authMiddleware');
+const { authenticate, requireRole } = require('../middleware/authMiddleware');
 const Notification = require('../models/Notification');
 const DeviceToken  = require('../models/DeviceToken');
+const { Event, EventMember, User } = require('../models');
+const { sendNotification } = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -92,6 +94,97 @@ router.delete('/device-token', authenticate, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove device token' });
+  }
+});
+
+// ── POST /notifications/broadcast ────────────────────────────────────────────
+// Organizer sends a push notification to ALL members of an event.
+// Body: { event_id, message_type: 'template'|'custom', custom_message? }
+// Template message: "New photos have been added to <event title>"
+router.post('/broadcast', authenticate, requireRole('organizer'), async (req, res) => {
+  const { event_id, message_type, custom_message } = req.body;
+  if (!event_id || !message_type) {
+    return res.status(400).json({ error: 'event_id and message_type required' });
+  }
+
+  try {
+    const event = await Event.findOne({
+      where: { id: event_id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    const members = await EventMember.findAll({
+      where: { event_id, role: 'member' },
+      attributes: ['user_id'],
+    });
+    if (!members.length) return res.json({ success: true, sent: 0 });
+
+    const notifBody = message_type === 'custom' && custom_message?.trim()
+      ? custom_message.trim().slice(0, 200)
+      : `New photos have been added to "${event.title}" — check them out!`;
+
+    await Promise.all(
+      members.map(m =>
+        sendNotification({
+          userId: m.user_id,
+          type:   'organizer_broadcast',
+          title:  event.title,
+          body:   notifBody,
+          data:   { event_id: String(event_id), screen: 'gallery' },
+        })
+      )
+    );
+
+    res.json({ success: true, sent: members.length });
+  } catch (err) {
+    console.error('Broadcast error:', err);
+    res.status(500).json({ error: 'Failed to send broadcast notification' });
+  }
+});
+
+// ── POST /notifications/targeted ─────────────────────────────────────────────
+// Organizer sends a push notification to specific member(s) of an event.
+// Body: { event_id, user_ids: number[], message_type: 'template'|'custom', custom_message? }
+// Template message: "Your photos are ready in <event title>"
+router.post('/targeted', authenticate, requireRole('organizer'), async (req, res) => {
+  const { event_id, user_ids, message_type, custom_message } = req.body;
+  if (!event_id || !Array.isArray(user_ids) || !user_ids.length || !message_type) {
+    return res.status(400).json({ error: 'event_id, user_ids[] and message_type required' });
+  }
+
+  try {
+    const event = await Event.findOne({
+      where: { id: event_id, organizer_id: req.user.id, is_active: true },
+    });
+    if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
+
+    // Verify all target users are actually members
+    const members = await EventMember.findAll({
+      where: { event_id, user_id: user_ids },
+      attributes: ['user_id'],
+    });
+    if (!members.length) return res.status(400).json({ error: 'No valid members found' });
+
+    const notifBody = message_type === 'custom' && custom_message?.trim()
+      ? custom_message.trim().slice(0, 200)
+      : `Your photos are ready in "${event.title}" — tap to view them!`;
+
+    await Promise.all(
+      members.map(m =>
+        sendNotification({
+          userId: m.user_id,
+          type:   'organizer_targeted',
+          title:  event.title,
+          body:   notifBody,
+          data:   { event_id: String(event_id), screen: 'gallery' },
+        })
+      )
+    );
+
+    res.json({ success: true, sent: members.length });
+  } catch (err) {
+    console.error('Targeted notification error:', err);
+    res.status(500).json({ error: 'Failed to send targeted notification' });
   }
 });
 

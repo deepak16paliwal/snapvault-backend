@@ -95,6 +95,7 @@ app.use('/billing', require('./routes/billing'));
 app.use('/webhooks', require('./routes/webhooks'));
 app.use('/users', require('./routes/users'));
 app.use('/contact', require('./routes/contact'));
+app.use('/connect', require('./routes/connect'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'Health ok' }));
