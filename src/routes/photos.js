@@ -322,28 +322,28 @@ router.post('/face-search', authenticate, upload.single('image'), [
     const membership = await EventMember.findOne({ where: { event_id: eventId, user_id: req.user.id } });
     if (!membership) return res.status(403).json({ error: 'You are not a member of this event' });
 
-    // Enforce 2-scan limit for non-organizers
-    const SCAN_LIMIT = 2;
-    if (membership.role !== 'organizer' && membership.face_scan_count >= SCAN_LIMIT) {
+    // Enforce plan-based scan limit — applies to everyone including organizers
+    const planLimits = await getPlanLimits(req.user.subscription_plan || 'free');
+    const SCAN_LIMIT = planLimits?.max_face_scans_per_event ?? 1;
+
+    if (membership.face_scan_count >= SCAN_LIMIT) {
       return res.status(429).json({
-        error: `Scan limit reached. Each member can only scan ${SCAN_LIMIT} times per event.`,
+        error: `Scan limit reached. Your ${planLimits?.name || 'current'} plan allows ${SCAN_LIMIT} scan${SCAN_LIMIT !== 1 ? 's' : ''} per event. Upgrade to scan more.`,
         scans_used: membership.face_scan_count,
         scans_remaining: 0,
+        scan_limit: SCAN_LIMIT,
       });
     }
 
     // Count the scan BEFORE calling Rekognition — AWS charges per API call regardless of result
-    if (membership.role !== 'organizer') {
-      try {
-        await membership.increment('face_scan_count');
-        console.log(`[FaceScan] user ${req.user.id} event ${eventId}: face_scan_count incremented`);
-      } catch (incErr) {
-        console.error(`[FaceScan] Failed to increment face_scan_count for user ${req.user.id}:`, incErr.message);
-        // Continue — don't fail the face search just because the count update failed
-      }
+    try {
+      await membership.increment('face_scan_count');
+      console.log(`[FaceScan] user ${req.user.id} event ${eventId}: face_scan_count incremented (plan limit: ${SCAN_LIMIT})`);
+    } catch (incErr) {
+      console.error(`[FaceScan] Failed to increment face_scan_count for user ${req.user.id}:`, incErr.message);
     }
-    const usedCount = membership.face_scan_count + (membership.role !== 'organizer' ? 1 : 0);
-    const scansRemaining = membership.role !== 'organizer' ? Math.max(0, SCAN_LIMIT - usedCount) : null;
+    const usedCount = membership.face_scan_count + 1;
+    const scansRemaining = Math.max(0, SCAN_LIMIT - usedCount);
 
     // Search per-event Rekognition collection with the selfie
     const matches = await rekognitionService.searchFacesByImage(`event_${eventId}`, req.file.buffer);
@@ -352,6 +352,7 @@ router.post('/face-search', authenticate, upload.single('image'), [
       return res.status(400).json({
         error: 'No face detected in the image or no matching photos found',
         scans_remaining: scansRemaining,
+        scan_limit: SCAN_LIMIT,
       });
     }
 

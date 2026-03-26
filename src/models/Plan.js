@@ -14,6 +14,7 @@ const Plan = sequelize.define('Plan', {
   toggle_downloads: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   gallery_themes: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   anonymous_viewing: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  max_face_scans_per_event: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
   retention_days: { type: DataTypes.INTEGER, allowNull: true },
   sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },

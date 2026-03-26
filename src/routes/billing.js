@@ -346,6 +346,7 @@ router.patch('/admin/plans/:plan_key', authenticate, requireRole('admin'), async
       'name', 'price_paise', 'max_photos', 'max_storage_mb', 'max_videos',
       'bulk_download', 'analytics', 'toggle_downloads', 'gallery_themes',
       'anonymous_viewing', 'retention_days', 'sort_order', 'is_active',
+      'max_face_scans_per_event',
     ];
     const updates = {};
     for (const key of allowed) {
