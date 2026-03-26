@@ -8,6 +8,18 @@ const { deleteEventCollection } = require('../services/rekognitionService');
 async function runExpiryJob() {
   const now = new Date();
 
+  // 0. Permanently purge soft-deleted photos older than 10 days
+  const photoCutoff = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+  const deletedPhotos = await Photo.findAll({
+    where: { soft_deleted_at: { [Op.ne]: null, [Op.lte]: photoCutoff } },
+  });
+  for (const photo of deletedPhotos) {
+    if (photo.s3_key) await deleteFile(photo.s3_key).catch(() => {});
+    if (photo.thumbnail_key) await deleteFile(photo.thumbnail_key).catch(() => {});
+    await photo.destroy();
+    console.log(`[ExpiryJob] Photo ${photo.id} permanently purged (10-day window elapsed)`);
+  }
+
   // 1. Expire events past their expiry date — mark inactive + record soft_deleted_at
   const expired = await Event.findAll({
     where: { expires_at: { [Op.lte]: now }, is_active: true },

@@ -24,6 +24,7 @@ const Photo = sequelize.define('Photo', {
   is_hidden: { type: DataTypes.BOOLEAN, defaultValue: false },
   is_pinned: { type: DataTypes.BOOLEAN, defaultValue: false },
   is_highlighted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  soft_deleted_at: { type: DataTypes.DATE, allowNull: true },
 }, {
   tableName: 'photos',
   underscored: true,

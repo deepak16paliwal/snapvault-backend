@@ -1,4 +1,4 @@
-const { Plan, Photo } = require('../models');
+const { Plan, Photo, User } = require('../models');
 const { Op, fn, col } = require('sequelize');
 
 async function getPlanLimits(planKey) {
@@ -22,8 +22,9 @@ async function checkQuota(user, mimeType) {
         reason: `Your ${limits.name} plan does not support video uploads. Upgrade to Basic or higher.`,
       };
     }
+    // Count only active (non-deleted) videos
     const videoCount = await Photo.count({
-      where: { uploader_id: user.id, status: 'uploaded', mime_type: { [Op.like]: 'video/%' } },
+      where: { uploader_id: user.id, status: 'uploaded', soft_deleted_at: null, mime_type: { [Op.like]: 'video/%' } },
     });
     if (videoCount >= limits.max_videos) {
       return {
@@ -32,8 +33,9 @@ async function checkQuota(user, mimeType) {
       };
     }
   } else {
+    // Count only active (non-deleted) photos
     const photoCount = await Photo.count({
-      where: { uploader_id: user.id, status: 'uploaded' },
+      where: { uploader_id: user.id, status: 'uploaded', soft_deleted_at: null },
     });
     if (photoCount >= limits.max_photos) {
       return {
@@ -43,14 +45,10 @@ async function checkQuota(user, mimeType) {
     }
   }
 
-  // Check storage quota (based on original file sizes)
+  // Storage quota: use cumulative counter — never decremented on delete
   const storageLimitBytes = limits.max_storage_mb * 1024 * 1024;
-  const storageRow = await Photo.findOne({
-    where: { uploader_id: user.id, status: 'uploaded' },
-    attributes: [[fn('SUM', col('file_size')), 'total']],
-    raw: true,
-  });
-  const usedBytes = parseInt(storageRow?.total || 0);
+  const freshUser = await User.findByPk(user.id, { attributes: ['storage_consumed_bytes'] });
+  const usedBytes = parseInt(freshUser?.storage_consumed_bytes || 0);
   if (usedBytes >= storageLimitBytes) {
     const limitGb = limits.max_storage_mb >= 1024
       ? `${(limits.max_storage_mb / 1024).toFixed(0)} GB`
@@ -64,13 +62,10 @@ async function checkQuota(user, mimeType) {
   return { allowed: true };
 }
 
+// Returns cumulative consumed bytes (for dashboard display)
 async function getStorageUsed(userId) {
-  const row = await Photo.findOne({
-    where: { uploader_id: userId, status: 'uploaded' },
-    attributes: [[fn('SUM', col('file_size')), 'total']],
-    raw: true,
-  });
-  return parseInt(row?.total || 0);
+  const user = await User.findByPk(userId, { attributes: ['storage_consumed_bytes'] });
+  return parseInt(user?.storage_consumed_bytes || 0);
 }
 
 module.exports = { checkQuota, getPlanLimits, getStorageUsed };

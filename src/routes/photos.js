@@ -141,6 +141,11 @@ router.post('/confirm', authenticate, [
     if (stored_size_bytes) updateData.stored_size_bytes = stored_size_bytes;
     await photo.update(updateData);
 
+    // Increment cumulative storage counter — never decremented (storage is non-refundable)
+    if (photo.file_size) {
+      await User.increment('storage_consumed_bytes', { by: photo.file_size, where: { id: req.user.id } });
+    }
+
     // Notify all event members (except uploader) about new photo — fire-and-forget
     setImmediate(async () => {
       try {
@@ -454,7 +459,8 @@ router.get('/event/:event_id', authenticate, async (req, res) => {
     const isOrganizer = membership.role === 'organizer';
 
     // Organizers see all photos (including hidden); guests only see non-hidden
-    const where = { event_id: eventId, status: 'uploaded' };
+    // Soft-deleted photos are excluded for everyone
+    const where = { event_id: eventId, status: 'uploaded', soft_deleted_at: null };
     if (!isOrganizer) where.is_hidden = false;
 
     const { count, rows: photos } = await Photo.findAndCountAll({
@@ -542,23 +548,75 @@ router.delete('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to delete this photo' });
     }
 
-    // Delete Rekognition faces before removing from DB
-    const faces = await PhotoFace.findAll({ where: { photo_id: photo.id } });
-    if (faces.length > 0) {
-      await rekognitionService.deleteFaces(`event_${photo.event_id}`, faces.map((f) => f.rekognition_face_id));
-    }
+    // Soft delete — keep file in R2 and record in DB, recoverable for 10 days
+    await photo.update({ soft_deleted_at: new Date() });
 
-    // Delete from S3
-    await deleteFile(photo.s3_key);
-    if (photo.thumbnail_key) await deleteFile(photo.thumbnail_key);
-
-    // Delete from DB (CASCADE deletes photo_faces rows)
-    await photo.destroy();
-
-    res.json({ message: 'Photo deleted successfully' });
+    res.json({ message: 'Photo deleted. You can recover it within 10 days.', recoverable: true });
   } catch (err) {
     console.error('Delete photo error:', err);
     res.status(500).json({ error: 'Failed to delete photo' });
+  }
+});
+
+// POST /photos/:id/recover
+// Organizer or uploader can recover a soft-deleted photo within 10 days
+router.post('/:id/recover', authenticate, async (req, res) => {
+  const RECOVERY_DAYS = 10;
+  try {
+    const photo = await Photo.findOne({
+      where: { id: req.params.id, soft_deleted_at: { [Op.ne]: null } },
+    });
+    if (!photo) return res.status(404).json({ error: 'Deleted photo not found' });
+
+    const isUploader = photo.uploader_id === req.user.id;
+    const isOrganizer = await EventMember.findOne({
+      where: { event_id: photo.event_id, user_id: req.user.id, role: 'organizer' },
+    });
+    if (!isUploader && !isOrganizer) return res.status(403).json({ error: 'Not authorized' });
+
+    const cutoff = new Date(Date.now() - RECOVERY_DAYS * 24 * 60 * 60 * 1000);
+    if (photo.soft_deleted_at < cutoff) {
+      return res.status(410).json({ error: 'Recovery window has expired. This photo has been permanently deleted.' });
+    }
+
+    await photo.update({ soft_deleted_at: null });
+    res.json({ message: 'Photo recovered successfully' });
+  } catch (err) {
+    console.error('Recover photo error:', err);
+    res.status(500).json({ error: 'Failed to recover photo' });
+  }
+});
+
+// GET /photos/deleted/:event_id
+// Returns soft-deleted photos for an event (organizer only)
+router.get('/deleted/:event_id', authenticate, async (req, res) => {
+  const RECOVERY_DAYS = 10;
+  try {
+    const isOrganizer = await EventMember.findOne({
+      where: { event_id: req.params.event_id, user_id: req.user.id, role: 'organizer' },
+    });
+    if (!isOrganizer) return res.status(403).json({ error: 'Organizer access required' });
+
+    const cutoff = new Date(Date.now() - RECOVERY_DAYS * 24 * 60 * 60 * 1000);
+    const photos = await Photo.findAll({
+      where: {
+        event_id: req.params.event_id,
+        soft_deleted_at: { [Op.ne]: null, [Op.gte]: cutoff },
+      },
+      order: [['soft_deleted_at', 'DESC']],
+    });
+
+    const withUrls = await Promise.all(photos.map(async (p) => {
+      const url = await getDownloadUrl(p.s3_key).catch(() => null);
+      const thumbUrl = p.thumbnail_key ? await getDownloadUrl(p.thumbnail_key).catch(() => null) : null;
+      const expiresAt = new Date(p.soft_deleted_at.getTime() + RECOVERY_DAYS * 24 * 60 * 60 * 1000);
+      return { ...p.toJSON(), s3_url: url, thumbnail_url: thumbUrl, recoverable_until: expiresAt };
+    }));
+
+    res.json({ photos: withUrls, recovery_days: RECOVERY_DAYS });
+  } catch (err) {
+    console.error('GET /photos/deleted error:', err);
+    res.status(500).json({ error: 'Failed to fetch deleted photos' });
   }
 });
 

@@ -46,6 +46,7 @@ const User = sequelize.define('User', {
     type: DataTypes.ENUM('free', 'basic', 'standard', 'essential', 'premium'),
     defaultValue: 'free',
   },
+  storage_consumed_bytes: { type: DataTypes.BIGINT, defaultValue: 0 },
 }, {
   tableName: 'users',
 });

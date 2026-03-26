@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const router = express.Router();
 
 const { Event, EventMember, User, Photo } = require('../models');
+const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const { authenticate, requireRole } = require('../middleware/authMiddleware');
 const { sendAddedToEventEmail, sendEventInviteEmail } = require('../services/emailService');
@@ -266,11 +267,57 @@ router.delete('/:id', authenticate, requireRole('organizer'), async (req, res) =
       return res.status(404).json({ error: 'Event not found or not authorized' });
     }
 
-    await event.update({ is_active: false });
-    res.json({ message: 'Event deactivated successfully' });
+    await event.update({ is_active: false, soft_deleted_at: new Date() });
+    res.json({ message: 'Event deleted. You can recover it within 10 days.', recoverable: true });
   } catch (err) {
     console.error('Delete event error:', err);
-    res.status(500).json({ error: 'Failed to deactivate event' });
+    res.status(500).json({ error: 'Failed to delete event' });
+  }
+});
+
+// GET /events/deleted — list soft-deleted events for the organizer (within 10-day window)
+router.get('/deleted', authenticate, requireRole('organizer'), async (req, res) => {
+  const RECOVERY_DAYS = 10;
+  try {
+    const cutoff = new Date(Date.now() - RECOVERY_DAYS * 24 * 60 * 60 * 1000);
+    const events = await Event.findAll({
+      where: {
+        organizer_id: req.user.id,
+        is_active: false,
+        soft_deleted_at: { [Op.ne]: null, [Op.gte]: cutoff },
+      },
+      order: [['soft_deleted_at', 'DESC']],
+    });
+    const withExpiry = events.map((e) => ({
+      ...e.toJSON(),
+      recoverable_until: new Date(e.soft_deleted_at.getTime() + RECOVERY_DAYS * 24 * 60 * 60 * 1000),
+    }));
+    res.json({ events: withExpiry, recovery_days: RECOVERY_DAYS });
+  } catch (err) {
+    console.error('GET /events/deleted error:', err);
+    res.status(500).json({ error: 'Failed to fetch deleted events' });
+  }
+});
+
+// POST /events/:id/recover — recover a soft-deleted event within 10 days
+router.post('/:id/recover', authenticate, requireRole('organizer'), async (req, res) => {
+  const RECOVERY_DAYS = 10;
+  try {
+    const event = await Event.findOne({
+      where: { id: req.params.id, organizer_id: req.user.id, is_active: false, soft_deleted_at: { [Op.ne]: null } },
+    });
+    if (!event) return res.status(404).json({ error: 'Deleted event not found' });
+
+    const cutoff = new Date(Date.now() - RECOVERY_DAYS * 24 * 60 * 60 * 1000);
+    if (event.soft_deleted_at < cutoff) {
+      return res.status(410).json({ error: 'Recovery window has expired. This event has been permanently deleted.' });
+    }
+
+    await event.update({ is_active: true, soft_deleted_at: null });
+    res.json({ message: 'Event recovered successfully' });
+  } catch (err) {
+    console.error('Recover event error:', err);
+    res.status(500).json({ error: 'Failed to recover event' });
   }
 });
 
