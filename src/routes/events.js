@@ -568,21 +568,22 @@ router.post('/:id/connect', authenticate, async (req, res) => {
 
     // Upsert — allow updating the message if request already exists
     await ConnectionRequest.upsert({
-      event_id: event.id,
+      event_id:     event.id,
       requester_id: req.user.id,
       organizer_id: event.organizer_id,
-      message: message?.trim()?.slice(0, 300) || null,
+      message:      message?.trim()?.slice(0, 300) || null,
     });
 
-    // Notify organizer
-    const requester = await User.findByPk(req.user.id, { attributes: ['name'] });
-    await sendNotification({
-      userId: event.organizer_id,
-      type: 'connect_request',
-      title: 'New Connection Request',
-      body: `${requester?.name || 'A guest'} from "${event.title}" wants to connect with you`,
-      data: { event_id: String(event.id), screen: 'connect_requests' },
-    });
+    // Notify organizer — fire-and-forget so notification failures never block the response
+    User.findByPk(req.user.id, { attributes: ['name'] }).then(requester => {
+      return sendNotification({
+        userId: event.organizer_id,
+        type:   'connect_request',
+        title:  'New Connection Request',
+        body:   `${requester?.name || 'A guest'} from "${event.title}" wants to connect with you`,
+        data:   { event_id: String(event.id), screen: 'connect_requests' },
+      });
+    }).catch(err => console.error('[connect] notification error:', err));
 
     res.json({ success: true });
   } catch (err) {

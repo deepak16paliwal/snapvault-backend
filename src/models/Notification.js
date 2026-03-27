@@ -8,7 +8,7 @@ const Notification = sequelize.define('Notification', {
   body:       { type: DataTypes.TEXT, allowNull: false },
   data_json:  { type: DataTypes.JSON },
   is_read:    { type: DataTypes.BOOLEAN, defaultValue: false },
-  created_at: { type: DataTypes.DATE, allowNull: false },
+  created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
 }, {
   tableName: 'notifications',
   timestamps: false,

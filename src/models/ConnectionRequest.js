@@ -7,12 +7,11 @@ const ConnectionRequest = sequelize.define('ConnectionRequest', {
   requester_id: { type: DataTypes.INTEGER, allowNull: false },
   organizer_id: { type: DataTypes.INTEGER, allowNull: false },
   message:      { type: DataTypes.TEXT, allowNull: true },
+  created_at:   { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
 }, {
   tableName: 'connection_requests',
   underscored: true,
-  timestamps: true,
-  createdAt: 'created_at',
-  updatedAt: false,
+  timestamps: false,
 });
 
 module.exports = ConnectionRequest;
