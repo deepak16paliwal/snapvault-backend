@@ -104,18 +104,25 @@ router.get('/', authenticate, async (req, res) => {
       scanRows.forEach(r => { scanTotals[r.event_id] = parseInt(r.total, 10) || 0; });
     }
 
-    const events = await Promise.all(memberships.map(async m => ({
-      ...m.Event.toJSON(),
-      cover_photo_url: m.Event.cover_storage_key
-        ? await getDownloadUrl(m.Event.cover_storage_key)
-        : m.Event.cover_photo_url || null,
-      my_role: m.role,
-      my_access_type: m.access_type,
-      my_face_scan_count: m.face_scan_count,
-      member_count: memberCounts[m.Event.id] || 0,
-      photo_count: photoCounts[m.Event.id] || 0,
-      total_scans: scanTotals[m.Event.id] || 0,
-    })));
+    const events = await Promise.all(memberships.map(async m => {
+      let brandLogoUrl = null;
+      if (m.Event.brand_logo_url) {
+        try { brandLogoUrl = await getDownloadUrl(m.Event.brand_logo_url, 3600); } catch (_) {}
+      }
+      return {
+        ...m.Event.toJSON(),
+        cover_photo_url: m.Event.cover_storage_key
+          ? await getDownloadUrl(m.Event.cover_storage_key)
+          : m.Event.cover_photo_url || null,
+        brand_logo_url: brandLogoUrl,
+        my_role: m.role,
+        my_access_type: m.access_type,
+        my_face_scan_count: m.face_scan_count,
+        member_count: memberCounts[m.Event.id] || 0,
+        photo_count: photoCounts[m.Event.id] || 0,
+        total_scans: scanTotals[m.Event.id] || 0,
+      };
+    }));
 
     res.json({ events });
   } catch (err) {
@@ -185,12 +192,18 @@ router.get('/:id', authenticate, async (req, res) => {
 
     const limits = await getPlanLimits(organizer?.subscription_plan || 'free');
 
+    let brandLogoUrl = null;
+    if (event.brand_logo_url) {
+      try { brandLogoUrl = await getDownloadUrl(event.brand_logo_url, 3600); } catch (_) {}
+    }
+
     res.json({
       event: {
         ...event.toJSON(),
         cover_photo_url: event.cover_storage_key
           ? await getDownloadUrl(event.cover_storage_key)
           : event.cover_photo_url || null,
+        brand_logo_url: brandLogoUrl,
         invite_link: membership.role === 'organizer'
           ? `${process.env.FRONTEND_URL || 'https://snaplivo.in'}/join/${event.invite_token}`
           : undefined,
@@ -494,7 +507,7 @@ router.post('/:id/brand-logo-url', authenticate, requireRole('organizer'), async
 });
 
 // ── PATCH /events/:id/brand-logo ─────────────────────────────────────────────
-// Confirm brand logo upload — saves the public URL on the event
+// Confirm brand logo upload — saves the storage key on the event
 router.patch('/:id/brand-logo', authenticate, requireRole('organizer'), async (req, res) => {
   try {
     const event = await Event.findOne({
@@ -502,11 +515,11 @@ router.patch('/:id/brand-logo', authenticate, requireRole('organizer'), async (r
     });
     if (!event) return res.status(404).json({ error: 'Event not found or not authorized' });
 
-    const { brand_logo_url } = req.body;
-    if (!brand_logo_url) return res.status(400).json({ error: 'brand_logo_url required' });
+    const { brand_logo_storage_key } = req.body;
+    if (!brand_logo_storage_key) return res.status(400).json({ error: 'brand_logo_storage_key required' });
 
-    await event.update({ brand_logo_url });
-    res.json({ success: true, brand_logo_url });
+    await event.update({ brand_logo_url: brand_logo_storage_key });
+    res.json({ success: true });
   } catch (err) {
     console.error('Brand logo confirm error:', err);
     res.status(500).json({ error: 'Failed to save brand logo' });
