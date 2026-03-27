@@ -70,7 +70,7 @@ router.post('/create-order', authenticate, requireOrganizer, async (req, res) =>
       order_id: order.id,
       amount: order.amount,
       currency: order.currency,
-      key: process.env.RAZORPAY_KEY_ID,
+      key_id: process.env.RAZORPAY_KEY_ID,
       plan_name: plan.name,
     });
   } catch (err) {
