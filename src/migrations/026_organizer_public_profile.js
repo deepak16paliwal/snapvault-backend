@@ -1,4 +1,4 @@
-const { sequelize } = require('../models');
+const sequelize = require('../config/database');
 
 async function up() {
   await sequelize.query(`

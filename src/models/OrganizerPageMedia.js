@@ -1,5 +1,5 @@
 const { DataTypes } = require('sequelize');
-const { sequelize } = require('./index');
+const sequelize = require('../config/database');
 
 const OrganizerPageMedia = sequelize.define('OrganizerPageMedia', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
