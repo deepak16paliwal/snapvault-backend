@@ -13,7 +13,7 @@ app.get('/.well-known/apple-app-site-association', (req, res) => {
     applinks: {
       details: [{
         appIDs: ['ZA2JH67T7M.com.snaplivo.snaplivo'],
-        components: [{ '/': '/events/join/*' }],
+        components: [{ '/': '/join/*' }, { '/': '/events/join/*' }],
       }],
     },
   });
