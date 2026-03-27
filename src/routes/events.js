@@ -208,6 +208,7 @@ router.get('/:id', authenticate, async (req, res) => {
           ? `${process.env.FRONTEND_URL || 'https://snaplivo.in'}/join/${event.invite_token}`
           : undefined,
         photo_count: photoCount,
+        scan_limit: limits?.max_face_scans_per_event ?? null,
       },
       my_role: membership.role,
       my_access_type: membership.access_type,
