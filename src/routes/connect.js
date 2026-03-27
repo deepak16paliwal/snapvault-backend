@@ -3,7 +3,7 @@ const router = express.Router();
 const { authenticate } = require('../middleware/authMiddleware');
 const ConnectionRequest = require('../models/ConnectionRequest');
 const { Event, User } = require('../models');
-const { getDownloadUrl } = require('../services/s3Service');
+const { presignStoredUrl } = require('../services/s3Service');
 
 // ── GET /connect/requests ─────────────────────────────────────────────────────
 // Organizer fetches all connection requests sent to them across all events
@@ -23,7 +23,7 @@ router.get('/requests', authenticate, async (req, res) => {
     const [users, events] = await Promise.all([
       User.findAll({
         where: { id: requesterIds },
-        attributes: ['id', 'name', 'email', 'phone', 'profile_photo_key'],
+        attributes: ['id', 'name', 'email', 'phone', 'profile_photo_url'],
       }),
       Event.findAll({
         where: { id: eventIds },
@@ -40,8 +40,8 @@ router.get('/requests', authenticate, async (req, res) => {
       const event = eventMap[r.event_id]    || {};
 
       let profile_photo_url = null;
-      if (user.profile_photo_key) {
-        try { profile_photo_url = await getDownloadUrl(user.profile_photo_key); } catch (_) {}
+      if (user.profile_photo_url) {
+        try { profile_photo_url = await presignStoredUrl(user.profile_photo_url, 3600); } catch (_) {}
       }
 
       return {
